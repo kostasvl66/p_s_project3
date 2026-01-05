@@ -1,0 +1,87 @@
+With program parameters:
+Array dimension: 1000 Zero_percentage: 60 Repetitions: 5 Threads: 4
+
+Average time calculations for 5 sample executions are:
+Serial matrix-vector multiplication: 0.038701
+Serial creation of CSR representation: 0.022590
+Serial CSR-vector multiplication: 0.010396
+Parallel matrix-vector multiplication: 0.003955
+Parallel creation of CSR representation: 0.003148
+Parallel CSR-vector multiplication: 0.005874
+--------------------------------------------------------------------------------------------------
+With program parameters:
+Array dimension: 10000 Zero_percentage: 60 Repetitions: 5 Threads: 4
+
+Average time calculations for 5 sample executions are:
+Serial matrix-vector multiplication: 3.211010
+Serial creation of CSR representation: 1.620603
+Serial CSR-vector multiplication: 1.772760
+Parallel matrix-vector multiplication: 0.342185
+Parallel creation of CSR representation: 0.179188
+Parallel CSR-vector multiplication: 1.002648
+--------------------------------------------------------------------------------------------------
+With program parameters:
+Array dimension: 1000 Zero_percentage: 0 Repetitions: 5 Threads: 4
+
+Average time calculations for 5 sample executions are:
+Serial matrix-vector multiplication: 0.032476
+Serial creation of CSR representation: 0.012938
+Serial CSR-vector multiplication: 0.021668
+Parallel matrix-vector multiplication: 0.003574
+Parallel creation of CSR representation: 0.001796
+Parallel CSR-vector multiplication: 0.011930
+--------------------------------------------------------------------------------------------------
+With program parameters:
+Array dimension: 1000 Zero_percentage: 99 Repetitions: 5 Threads: 4
+
+Average time calculations for 5 sample executions are:
+Serial matrix-vector multiplication: 0.031889
+Serial creation of CSR representation: 0.003824
+Serial CSR-vector multiplication: 0.000286
+Parallel matrix-vector multiplication: 0.003639
+Parallel creation of CSR representation: 0.000764
+Parallel CSR-vector multiplication: 0.000201
+--------------------------------------------------------------------------------------------------
+With program parameters:
+Array dimension: 1000 Zero_percentage: 60 Repetitions: 1 Threads: 4
+
+Average time calculations for 5 sample executions are:
+Serial matrix-vector multiplication: 0.006420
+Serial creation of CSR representation: 0.018679
+Serial CSR-vector multiplication: 0.001722
+Parallel matrix-vector multiplication: 0.000677
+Parallel creation of CSR representation: 0.002996
+Parallel CSR-vector multiplication: 0.000994
+--------------------------------------------------------------------------------------------------
+With program parameters:
+Array dimension: 1000 Zero_percentage: 60 Repetitions: 20 Threads: 4
+
+Average time calculations for 5 sample executions are:
+Serial matrix-vector multiplication: 0.128637
+Serial creation of CSR representation: 0.019010
+Serial CSR-vector multiplication: 0.034366
+Parallel matrix-vector multiplication: 0.014089
+Parallel creation of CSR representation: 0.003135
+Parallel CSR-vector multiplication: 0.021651
+--------------------------------------------------------------------------------------------------
+With program parameters:
+Array dimension: 1000 Zero_percentage: 60 Repetitions: 5 Threads: 8
+
+Average time calculations for 5 sample executions are:
+Serial matrix-vector multiplication: 0.032070
+Serial creation of CSR representation: 0.018785
+Serial CSR-vector multiplication: 0.008557
+Parallel matrix-vector multiplication: 0.003390
+Parallel creation of CSR representation: 0.001943
+Parallel CSR-vector multiplication: 0.004507
+--------------------------------------------------------------------------------------------------
+With program parameters:
+Array dimension: 1000 Zero_percentage: 60 Repetitions: 5 Threads: 16
+
+Average time calculations for 5 sample executions are:
+Serial matrix-vector multiplication: 0.032038
+Serial creation of CSR representation: 0.018664
+Serial CSR-vector multiplication: 0.008564
+Parallel matrix-vector multiplication: 0.002982
+Parallel creation of CSR representation: 0.002004
+Parallel CSR-vector multiplication: 0.004648
