@@ -219,6 +219,8 @@ int main(int argc, char *argv[]) {
     serial_CSRres = NULL;
     free(parallel_CSRres);
     parallel_CSRres = NULL;
+    CSR_destroy(&M_rep);
+    CSR_destroy(&parallel_M_rep);
 
     return 0;
 }

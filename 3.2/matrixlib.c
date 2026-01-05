@@ -186,6 +186,17 @@ int *CSR_mat_vec_omp(CSR_t rep, int *vec, int dimension) {
     return res_vec;
 }
 
+/* Deallocates the memory used by a CSR_t struct*/
+int CSR_destroy(CSR_t *csr) {
+    free(csr->col_array);
+    csr->col_array = NULL;
+    free(csr->val_array);
+    csr->val_array = NULL;
+    free(csr->start_idx);
+    csr->start_idx = NULL;
+    return 0;
+}
+
 /* Compares two integer arrays. Returns number of non-matching elements */
 int compare_array(int *A1, int *A2, int dimension) {
     int count = 0;
