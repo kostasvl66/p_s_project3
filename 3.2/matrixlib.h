@@ -42,3 +42,6 @@ int compare_array(int *A1, int *A2, int dimension);
 
 /* Compares two CSR representations, prints counts of non-matching elements */
 void compare_CSR(CSR_t CSR1, CSR_t CSR2, int non_zero, int rows);
+
+/* Deallocates the memory used by a CSR_t struct*/
+int CSR_destroy(CSR_t *csr);
