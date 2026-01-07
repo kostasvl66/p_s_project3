@@ -2,23 +2,19 @@
 #include <stdlib.h>
 #include <limits.h>
 #include <time.h>
-
-#ifdef _OPENMP
-#include <omp.h>
-#endif
+#include <mpi.h>
 
 // each polynomial coefficient a non-zero int within [-MAX_ABS_COEFFICIENT_VALUE, +MAX_ABS_COEFFICIENT_VALUE]
 #define MAX_ABS_COEFFICIENT_VALUE 1000
 
 long N;
-int THREAD_COUNT;
 
 // checks command usage; returns 0 on success, -1 otherwise
 int parse_args(int argc, char *argv[])
 {
-    if (argc != 3)
+    if (argc != 2)
     {
-        fprintf(stderr, "Usage: %s <pol degree> <thread count>\n", argv[0]);
+        fprintf(stderr, "Usage: %s <pol degree>\n", argv[0]);
         return -1;
     }
         
@@ -29,14 +25,6 @@ int parse_args(int argc, char *argv[])
         fprintf(stderr, "Invalid polynomial degree.\n");
         return -1;
     }
-        
-    long temp_thread_count = strtol(argv[2], &end, 10);
-    if (*end != '\0' || temp_thread_count < 1 || temp_thread_count > INT_MAX)
-    {
-        fprintf(stderr, "Invalid thread count.\n");
-        return -1;
-    }
-    THREAD_COUNT = (int)temp_thread_count;
 
     return 0;
 }
@@ -199,236 +187,230 @@ Polynomial *pol_multiply(Polynomial *pol1, Polynomial *pol2)
     return res;
 }
 
-// allocates 2d array (coef_arr for each thread) used like arr[thread][coef_index]
-// all coef_arrays have the same length (max_degree + 1)
-// returns NULL if failed
-int **allocate_coef_arr_per_thread(int thread_count, long max_degree)
-{
-    int **arr = malloc(thread_count * sizeof(int *));
-    if (!arr) return NULL;
-
-    arr[0] = malloc(thread_count * (max_degree + 1) * sizeof(int));
-    if (!arr[0]) 
-    {
-        free(arr);
-        return NULL;
-    }
-
-    for (int i = 1; i < thread_count; i++)
-        arr[i] = arr[0] + i * (max_degree + 1);
-
-    return arr;
-}
-
-// allocates 2d array (coef_arr for each thread) used like arr[thread][coef_index]
-// all coef_arrays have the same length (max_degree + 1) and are zero-initialized
-// returns NULL if failed
-int **zero_allocate_coef_arr_per_thread(int thread_count, long max_degree)
-{
-    int **arr = malloc(thread_count * sizeof(int *));
-    if (!arr) return NULL;
-
-    arr[0] = calloc(thread_count * (max_degree + 1), sizeof(int));
-    if (!arr[0]) 
-    {
-        free(arr);
-        return NULL;
-    }
-
-    for (int i = 1; i < thread_count; i++)
-        arr[i] = arr[0] + i * (max_degree + 1);
-
-    return arr;
-}
-
-// frees 2d array allocated either by allocate_coef_arr_per_thread or zero_allocate_coef_arr_per_thread
-// safe to call with NULL (does nothing)
-void free_coef_arr_per_thread(int **coef_per_thread)
-{
-    if (coef_per_thread)
-    {
-        free(coef_per_thread[0]);
-        free(coef_per_thread);
-    }
-}
-
-Polynomial *pol_multiply_threaded(Polynomial *pol1, Polynomial *pol2, int thread_count)
-{
-    #ifndef _OPENMP
-    fprintf(stderr, "OpenMP is not supported.\n");
-    return NULL;
-    #else
-
+// called by every rank; all communications happen inside this call
+// non-zero ranks should pass NULL in pol1, pol2
+// for rank 0 *result gets the product, everyone else gets NULL
+// if *result != NULL, it is caller's responsibility to pol_destroy(result)
+// returns 0 on success, -1 otherwise
+int pol_multiply_parallel(
+    Polynomial *pol1,
+    Polynomial *pol2,
+    Polynomial **result,
+    int comm_rank,
+    int comm_size
+) {
     int success = 1;
 
     // initializing to NULL for safe cleanup
-    Polynomial *res                  = NULL;
-    Polynomial *prod_i_per_thread    = NULL;
-    int **prod_i_coef_arr_per_thread = NULL;
-    Polynomial *acc_per_thread       = NULL;
-    int **acc_coef_arr_per_thread    = NULL;
+    Polynomial *res      = NULL;
+    Polynomial *prod_i   = NULL;
+    int *prod_i_coef_arr = NULL;
+    Polynomial *acc      = NULL;
+    int *acc_coef_arr    = NULL;
 
-    res = malloc(sizeof(Polynomial));
-    if (!res)
-    {
-        success = 0;
-        goto cleanup;
+    int deg1, deg2;
+    int degs[2]; // deg1 and deg2
+    if (comm_rank == 0)
+    {   
+        degs[0] = pol1->degree;
+        degs[1] = pol2->degree;
     }
 
-    // new degree is the sum of the two
-    res->degree = pol1->degree + pol2->degree;
-    res->coef_arr = calloc(res->degree + 1, sizeof(int)); // initialized at 0
-    if (!(res->coef_arr))
-    {
-        success = 0;
-        goto cleanup;
-    }
+    MPI_Bcast(degs, 2, MPI_INT, 0, MPI_COMM_WORLD);
+    deg1 = degs[0];
+    deg2 = degs[1];
 
-    // stores for each thread, the product of i-th pol1 term and the whole pol2
-    prod_i_per_thread = malloc(thread_count * sizeof(Polynomial));
-    if (!prod_i_per_thread)
-    {
-        success = 0;
-        goto cleanup;
-    }
-
-    // stores for each thread, the coef_arr that will be assigned to prod_i_per_thread[thread]
-    prod_i_coef_arr_per_thread = allocate_coef_arr_per_thread(thread_count, res->degree);
-    if (!prod_i_coef_arr_per_thread)
-    {
-        success = 0;
-        goto cleanup;
-    }
-
-    for (int thread = 0; thread < thread_count; thread++) // assigns coefficient arrays
-        prod_i_per_thread[thread].coef_arr = prod_i_coef_arr_per_thread[thread];
-
-    // stores for each thread, an accumulator polynomial for partial sums, which are combined in the end to form res
-    acc_per_thread = malloc(thread_count * sizeof(Polynomial));
-    if (!acc_per_thread)
-    {
-        success = 0;
-        goto cleanup;
-    }
-
-    // stores for each thread, the coef_arr that will be assigned to acc_per_thread[thread]
-    acc_coef_arr_per_thread = zero_allocate_coef_arr_per_thread(thread_count, res->degree);
-    if (!acc_coef_arr_per_thread)
-    {
-        success = 0;
-        goto cleanup;
-    }
-
-    for (int thread = 0; thread < thread_count; thread++) // assigns coefficient arrays
-        acc_per_thread[thread].coef_arr = acc_coef_arr_per_thread[thread];
-
-    #pragma omp parallel num_threads(thread_count) \
-        default(none) shared(pol1, pol2, res, prod_i_per_thread, acc_per_thread)
-    {
-        int rank = omp_get_thread_num();
-        Polynomial *prod_i = &prod_i_per_thread[rank];
-        Polynomial *acc = &acc_per_thread[rank];
-
-        #pragma omp for schedule(static, 1) nowait
-        for (long i = 0; i <= pol1->degree; i++)
+    if (comm_rank == 0)
+    {   
+        // res is only relevant to rank 0
+        res = malloc(sizeof(Polynomial));
+        if (!res)
         {
-            prod_i->degree = pol2->degree + i;
-            for (long j = 0; j <= prod_i->degree; j++)
-            {
-                if (j < i)
-                    prod_i->coef_arr[j] = 0;
-                else
-                    prod_i->coef_arr[j] = pol1->coef_arr[i] * pol2->coef_arr[j - i];
-            }
-
-            pol_add(prod_i, acc, acc);
+            success = 0;
+            goto cleanup;
         }
 
-        #pragma omp critical
-        pol_add(acc, res, res); // adding acc to res
+        // new degree is the sum of the two
+        res->degree = pol1->degree + pol2->degree;
+        res->coef_arr = calloc(res->degree + 1, sizeof(int)); // initialized at 0
+        if (!(res->coef_arr))
+        {
+            success = 0;
+            goto cleanup;
+        }
     }
+    else
+    {
+        // for non-zero ranks, pol2 will store the received coefficients of original pol2
+        pol2 = malloc(sizeof(Polynomial));
+        if (!pol2)
+        {
+            success = 0;
+            goto cleanup;
+        }
+
+        pol2->coef_arr = malloc((deg2 + 1) * sizeof(int));
+        {
+            success = 0;
+            goto cleanup;
+        }
+    }
+
+    // broadcasting all pol2 coefficients
+    MPI_Bcast(pol2->coef_arr, deg2 + 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+    // stores the product of i-th pol1 term and the whole pol2
+    prod_i = malloc(sizeof(Polynomial));
+    if (!prod_i)
+    {
+        success = 0;
+        goto cleanup;
+    }
+
+    // stores the coef_arr that will be assigned to prod_i_per_thread[thread]
+    prod_i_coef_arr = malloc((res->degree + 1) * sizeof(int));
+    if (!prod_i_coef_arr)
+    {
+        success = 0;
+        goto cleanup;
+    }
+
+    // assigning coefficient arrays
+    prod_i->coef_arr = prod_i_coef_arr;
+
+    // stores an accumulator polynomial for partial sums, which are combined in the end to form res
+    acc = malloc(sizeof(Polynomial));
+    if (!acc)
+    {
+        success = 0;
+        goto cleanup;
+    }
+
+    // stores the coef_arr that will be assigned to acc
+    acc_coef_arr = calloc(res->degree + 1, sizeof(int)); // initialized to 0
+    if (!acc_coef_arr)
+    {
+        success = 0;
+        goto cleanup;
+    }
+
+    // assigning coefficient arrays
+    acc->coef_arr = acc_coef_arr;
+
+    for (long i = 0; i <= pol1->degree; i++)
+    {
+        prod_i->degree = pol2->degree + i;
+        for (long j = 0; j <= prod_i->degree; j++)
+        {
+            if (j < i)
+                prod_i->coef_arr[j] = 0;
+            else
+                prod_i->coef_arr[j] = pol1->coef_arr[i] * pol2->coef_arr[j - i];
+        }
+
+        pol_add(prod_i, acc, acc);
+    }
+
+    pol_add(acc, res, res); // adding acc to res
     
 cleanup:
-    free_coef_arr_per_thread(acc_coef_arr_per_thread);
-    free(acc_per_thread);
-    free_coef_arr_per_thread(prod_i_coef_arr_per_thread);
-    free(prod_i_per_thread);
+    free_coef_arr_per_thread(acc_coef_arr);
+    free(acc);
+    free_coef_arr_per_thread(prod_i_coef_arr);
+    free(prod_i);
+    if (comm_rank != 0)
+        pol_destroy(&pol2);
     if (!success)
     {
         pol_destroy(&res);
-        return NULL;
+        return -1;
     }
 
-    return res;
-    #endif
+    *result = (comm_rank == 0) ? res : NULL;
+    return 0;
 }
 
 int main(int argc, char *argv[])
-{   
+{
+    int comm_size, my_rank;
     struct timespec start_init, end_init, start_serial, end_serial, start_parallel, end_parallel;
-    timespec_get(&start_init, TIME_UTC);
+    Polynomial *pol1 = NULL, *pol2 = NULL, *prod1, *prod2;
 
-    if (parse_args(argc, argv) == -1) return 1;
-    
-    srand(time(NULL));
+    MPI_Init(&argc, &argv);
+    MPI_Comm_size(MPI_COMM_WORLD, &comm_size);
+    MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
 
-    int *coef_arr1 = generate_random_coef(N);
-    if (!coef_arr1) return 1;
-    Polynomial *pol1;
-    if (pol_init(&pol1, coef_arr1, N) == -1) return 1;
-    //pol_print(pol1);
-
-    int *coef_arr2 = generate_random_coef(N);
-    if (!coef_arr2) return 1;
-    Polynomial *pol2;
-    if (pol_init(&pol2, coef_arr2, N) == -1)
+    if (my_rank == 0)
     {
-        pol_destroy(&pol1);
-        return 1;
-    } 
-    //pol_print(pol2);
+        timespec_get(&start_init, TIME_UTC);
 
-    timespec_get(&end_init, TIME_UTC);
-    printf("Initialization:     %.6f sec\n", elapsed(start_init, end_init));
+        if (parse_args(argc, argv) == -1)
+            MPI_Abort(MPI_COMM_WORLD, 1);
+        
+        srand(time(NULL));
 
-    timespec_get(&start_serial, TIME_UTC);
+        int *coef_arr1 = generate_random_coef(N);
+        if (!coef_arr1) MPI_Abort(MPI_COMM_WORLD, 1);
+        if (pol_init(&pol1, coef_arr1, N) == -1) MPI_Abort(MPI_COMM_WORLD, 1);
+        //pol_print(pol1);
 
-    Polynomial *prod1 = pol_multiply(pol1, pol2);
-    if (!prod1)
-    {
-        pol_destroy(&pol1);
-        pol_destroy(&pol2);
-        return 1;
+        int *coef_arr2 = generate_random_coef(N);
+        if (!coef_arr2) MPI_Abort(MPI_COMM_WORLD, 1);
+        if (pol_init(&pol2, coef_arr2, N) == -1)
+        {
+            pol_destroy(&pol1);
+            MPI_Abort(MPI_COMM_WORLD, 1);
+        } 
+        //pol_print(pol2);
+
+        timespec_get(&end_init, TIME_UTC);
+        printf("Initialization:     %.6f sec\n", elapsed(start_init, end_init));
+
+        timespec_get(&start_serial, TIME_UTC);
+
+        prod1 = pol_multiply(pol1, pol2);
+        if (!prod1)
+        {
+            pol_destroy(&pol1);
+            pol_destroy(&pol2);
+            MPI_Abort(MPI_COMM_WORLD, 1);
+        }
+        //pol_print(prod1);
+
+        timespec_get(&end_serial, TIME_UTC);
+        printf("Serial algorithm:   %.6f sec\n", elapsed(start_serial, end_serial));
+
+        timespec_get(&start_parallel, TIME_UTC);
     }
-    //pol_print(prod1);
 
-    timespec_get(&end_serial, TIME_UTC);
-    printf("Serial algorithm:   %.6f sec\n", elapsed(start_serial, end_serial));
+    if (pol_multiply_parallel(pol1, pol2, prod2, my_rank, comm_size) == -1)
+        MPI_Abort(MPI_COMM_WORLD, 1);
 
-    timespec_get(&start_parallel, TIME_UTC);
-
-    Polynomial *prod2 = pol_multiply_threaded(pol1, pol2, THREAD_COUNT);
-    if (!prod2)
+    if (my_rank == 0)
     {
+        if (!prod2)
+        {
+            pol_destroy(&pol1);
+            pol_destroy(&pol2);
+            pol_destroy(&prod1);
+            MPI_Abort(MPI_COMM_WORLD, 1);
+        }
+        //pol_print(prod2);
+
+        timespec_get(&end_parallel, TIME_UTC);
+        printf("Parallel algorithm: %.6f sec\n", elapsed(start_parallel, end_parallel));
+
+        if (pol_equals(prod1, prod2))
+            printf("Consistent results\n");
+        else
+            printf("Inconsistent results\n");
+        
         pol_destroy(&pol1);
         pol_destroy(&pol2);
         pol_destroy(&prod1);
-        return 1;
+        pol_destroy(&prod2);
     }
-    //pol_print(prod2);
-
-    timespec_get(&end_parallel, TIME_UTC);
-    printf("Parallel algorithm: %.6f sec\n", elapsed(start_parallel, end_parallel));
-
-    if (pol_equals(prod1, prod2))
-        printf("Consistent results\n");
-    else
-        printf("Inconsistent results\n");
     
-    pol_destroy(&pol1);
-    pol_destroy(&pol2);
-    pol_destroy(&prod1);
-    pol_destroy(&prod2);
-    
+    MPI_Finalize();
     return 0;
 }
