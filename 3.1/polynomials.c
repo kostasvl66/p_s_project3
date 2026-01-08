@@ -203,12 +203,13 @@ int pol_multiply_parallel(
 
     // initializing to NULL for safe cleanup
     Polynomial *res      = NULL;
+    int *local_coef1     = NULL;
     Polynomial *prod_i   = NULL;
     int *prod_i_coef_arr = NULL;
     Polynomial *acc      = NULL;
     int *acc_coef_arr    = NULL;
 
-    int deg1, deg2;
+    int deg1, deg2, final_deg;
     int degs[2]; // deg1 and deg2
     if (comm_rank == 0)
     {   
@@ -219,6 +220,7 @@ int pol_multiply_parallel(
     MPI_Bcast(degs, 2, MPI_INT, 0, MPI_COMM_WORLD);
     deg1 = degs[0];
     deg2 = degs[1];
+    final_deg = deg1 + deg2;
 
     if (comm_rank == 0)
     {   
@@ -250,10 +252,60 @@ int pol_multiply_parallel(
         }
 
         pol2->coef_arr = malloc((deg2 + 1) * sizeof(int));
+        if (!(pol2->coef_arr))
         {
             success = 0;
             goto cleanup;
         }
+
+        pol2->degree = deg2;
+    }
+
+    // assuring that pol1 buffer (to be split) length is perfectly divisible by comm_size
+    if ((deg1 + 1) % comm_size != 0)
+    {
+        if (comm_rank == 0)
+        {
+            fprintf(stderr, "pol1 buffer length not a multiple of comm_size\n");
+            fflush(stdout);
+        }
+        success = 0;
+        goto cleanup;
+    }
+    
+    int local_n1 = (deg1 + 1) / comm_size; // length of local pol1 chunk
+    local_coef1 = malloc(local_n1 * sizeof(int));
+    if (!local_coef1)
+    {
+        success = 0;
+        goto cleanup;
+    }
+
+    if (comm_rank == 0)
+    {
+        MPI_Scatter(
+            pol1->coef_arr,
+            local_n1,
+            MPI_INT,
+            local_coef1,
+            local_n1,
+            MPI_INT,
+            0,
+            MPI_COMM_WORLD
+        );
+    }
+    else
+    {
+        MPI_Scatter(
+            NULL,
+            local_n1,
+            MPI_INT,
+            local_coef1,
+            local_n1,
+            MPI_INT,
+            0,
+            MPI_COMM_WORLD
+        );
     }
 
     // broadcasting all pol2 coefficients
@@ -268,7 +320,7 @@ int pol_multiply_parallel(
     }
 
     // stores the coef_arr that will be assigned to prod_i_per_thread[thread]
-    prod_i_coef_arr = malloc((res->degree + 1) * sizeof(int));
+    prod_i_coef_arr = malloc((final_deg + 1) * sizeof(int));
     if (!prod_i_coef_arr)
     {
         success = 0;
@@ -287,17 +339,20 @@ int pol_multiply_parallel(
     }
 
     // stores the coef_arr that will be assigned to acc
-    acc_coef_arr = calloc(res->degree + 1, sizeof(int)); // initialized to 0
+    acc_coef_arr = calloc(final_deg + 1, sizeof(int)); // initialized to 0
     if (!acc_coef_arr)
     {
         success = 0;
         goto cleanup;
     }
 
-    // assigning coefficient arrays
+    // assigning coefficient arrays and degree (max degree needed)
     acc->coef_arr = acc_coef_arr;
+    acc->degree = deg1 + deg2;
 
-    for (long i = 0; i <= pol1->degree; i++)
+    long local_first = comm_rank * local_n1;
+    long local_last = local_first + local_n1 - 1;
+    for (long i = local_first; i <= local_last; i++)
     {
         prod_i->degree = pol2->degree + i;
         for (long j = 0; j <= prod_i->degree; j++)
@@ -305,24 +360,44 @@ int pol_multiply_parallel(
             if (j < i)
                 prod_i->coef_arr[j] = 0;
             else
-                prod_i->coef_arr[j] = pol1->coef_arr[i] * pol2->coef_arr[j - i];
+                prod_i->coef_arr[j] = local_coef1[i - local_first] * pol2->coef_arr[j - i];
         }
 
         pol_add(prod_i, acc, acc);
     }
 
-    pol_add(acc, res, res); // adding acc to res
-    
+    if (comm_rank == 0)
+    {
+        // first adding local acc of itself to res
+        pol_add(acc, res, res);
+        
+        // receiving other local sums and adding them
+        for (int rank = 1; rank < comm_size; rank++)
+        {
+            MPI_Recv(acc->coef_arr, acc->degree + 1, MPI_INT, rank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            pol_add(acc, res, res);
+        }
+    }
+    else
+    {
+        // sending local accumulated sum
+        MPI_Send(acc->coef_arr, acc->degree + 1, MPI_INT, 0, 0, MPI_COMM_WORLD);
+    }
+
 cleanup:
-    free_coef_arr_per_thread(acc_coef_arr);
+    free(acc_coef_arr);
     free(acc);
-    free_coef_arr_per_thread(prod_i_coef_arr);
+    free(prod_i_coef_arr);
     free(prod_i);
+    free(local_coef1);
+    
     if (comm_rank != 0)
         pol_destroy(&pol2);
+
     if (!success)
     {
-        pol_destroy(&res);
+        if (comm_rank == 0)
+            pol_destroy(&res);
         return -1;
     }
 
@@ -383,7 +458,10 @@ int main(int argc, char *argv[])
         timespec_get(&start_parallel, TIME_UTC);
     }
 
-    if (pol_multiply_parallel(pol1, pol2, prod2, my_rank, comm_size) == -1)
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    // every rank calls this
+    if (pol_multiply_parallel(pol1, pol2, &prod2, my_rank, comm_size) == -1)
         MPI_Abort(MPI_COMM_WORLD, 1);
 
     if (my_rank == 0)
@@ -395,7 +473,7 @@ int main(int argc, char *argv[])
             pol_destroy(&prod1);
             MPI_Abort(MPI_COMM_WORLD, 1);
         }
-        //pol_print(prod2);
+        //ol_print(prod2);
 
         timespec_get(&end_parallel, TIME_UTC);
         printf("Parallel algorithm: %.6f sec\n", elapsed(start_parallel, end_parallel));
