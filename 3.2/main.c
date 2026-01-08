@@ -1,5 +1,6 @@
 #include "matrixlib.h"
 #include <math.h>
+#include <mpi.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
@@ -31,9 +32,6 @@ int main(int argc, char *argv[]) {
     int reps = atoi(argv[3]);            // Number of times multiplication is repeated
     threads = atoi(argv[4]);             // Number of threads used for parallel execution
 
-    // Seeding rand for consistent results during program execution
-    srand(1);
-
     // Timespec initialization
     struct timespec serial_CSRrep_start, serial_CSRrep_finish;
     struct timespec serial_mult_start, serial_mult_finish;
@@ -42,6 +40,17 @@ int main(int argc, char *argv[]) {
     struct timespec parallel_CSRrep_start, parallel_CSRrep_finish;
     struct timespec parallel_mult_start, parallel_mult_finish;
     struct timespec parallel_CSRmult_start, parallel_CSRmult_finish;
+
+    // Seeding rand for consistent results during program execution
+    srand(1);
+
+    // Number of processes to be run with MPI
+    int comm_sz, my_rank;
+
+    // MPI initialization
+    MPI_Init(argc, argv);
+    MPI_Comm_size(MPI_COMM_WORLD, &comm_sz);
+    MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
 
     // Useful values
     int total_values = dimension * dimension;
@@ -221,6 +230,8 @@ int main(int argc, char *argv[]) {
     parallel_CSRres = NULL;
     CSR_destroy(&M_rep);
     CSR_destroy(&parallel_M_rep);
+
+    MPI_Finalize();
 
     return 0;
 }

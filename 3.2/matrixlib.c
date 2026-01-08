@@ -1,7 +1,4 @@
 #include "matrixlib.h"
-#ifdef _OPENMP
-#include <omp.h>
-#endif
 
 extern int threads;
 
@@ -116,7 +113,6 @@ CSR_t CSR_create_omp(int **matrix, int row, int col, int non_zero) {
     // Initializing first element of index list as 0
     csr.start_idx[0] = 0;
 
-#pragma omp parallel for num_threads(threads)
     for (int i = 0; i < row; i++) {
         int nz_count = 0; // Initializing a counter of non-zero elements in each row of the matrix
         for (int j = 0; j < col; j++) {
@@ -134,7 +130,6 @@ CSR_t CSR_create_omp(int **matrix, int row, int col, int non_zero) {
         csr.start_idx[x + 1] += csr.start_idx[x];
     }
 
-#pragma omp parallel for num_threads(threads)
     for (int i = 0; i < row; i++) {
         // Starting each line from the first non-zero element, as calcualted earlier
         int current_idx = csr.start_idx[i];
@@ -155,7 +150,6 @@ CSR_t CSR_create_omp(int **matrix, int row, int col, int non_zero) {
 int *mat_vec_omp(int **matrix, int *vector, int row, int col) {
     int *res_vec = (int *)malloc(col * sizeof(int)); // Vector to store product
     int i, j;
-#pragma omp parallel for num_threads(threads) default(none) private(i, j) shared(res_vec, matrix, vector, row, col)
     for (i = 0; i < row; i++) {
         res_vec[i] = 0; // Initializing values of result vector as 0
         for (j = 0; j < col; j++) {
@@ -171,7 +165,6 @@ int *CSR_mat_vec_omp(CSR_t rep, int *vec, int dimension) {
     int i, j, row_start, row_end;
     int *res_vec = malloc(dimension * sizeof(int));
 
-#pragma omp parallel for num_threads(threads) default(none) private(i, j, row_start, row_end) shared(res_vec, rep, vec, dimension)
     for (i = 0; i < dimension; i++) {
         // Setting pointers to the start and the end of each line
         row_start = rep.start_idx[i];
