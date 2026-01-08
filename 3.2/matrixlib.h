@@ -30,16 +30,16 @@ void print_array(int *array, int len);
 /*Parallel implementations using OpenMP*/
 
 /*Builds the Compressed Sparse Row representation of a sparse matrix using parallel execution*/
-CSR_t CSR_create_omp(int **matrix, int row, int col, int non_zero);
+CSR_t CSR_create_mpi(int **matrix, int row, int col, int non_zero);
 
 /* Returns the product of multiplication between a matrix and a vector using parallel execution*/
 int *mat_vec_mpi(int **matrix, int *vector, int row, int col);
 
 /* Returns the product of multiplication between a matrix and a vector using CSR representation, and parallel execution*/
-int *CSR_mat_vec_omp(CSR_t rep, int *vec, int dimension);
+int *CSR_mat_vec_mpi(CSR_t rep, int *vec, int dimension);
 
 /* Compares two integer arrays. Returns number of non-matching elements */
-int compare_array(int *A1, int *A2, int dimension);
+void compare_array(int *A1, int *A2, int dimension);
 
 /* Compares two CSR representations, prints counts of non-matching elements */
 void compare_CSR(CSR_t CSR1, CSR_t CSR2, int non_zero, int rows);

@@ -19,12 +19,12 @@ compile-test: test.c
 	gcc $(CFLAGS) test.c -o test
 
 main: main.c matrixlib.c
-	gcc $(CFLAGS) -c main.c -fopenmp -o main.o
-	gcc $(CFLAGS) -c matrixlib.c -fopenmp -o matrixlib.o
-	gcc $(CFLAGS) main.o matrixlib.o -fopenmp -o main $(LIBFLAGS)
+	mpicc $(CFLAGS) -c main.c -fopenmp -o main.o
+	mpicc $(CFLAGS) -c matrixlib.c -fopenmp -o matrixlib.o
+	mpicc $(CFLAGS) main.o matrixlib.o -fopenmp -o main $(LIBFLAGS)
 
 run: main
-	./main $(D) $(Z) $(R) $ $(T)
+	mpiexec ./main $(D) $(Z) $(R) $ $(T)
 
 clean: main
 	echo "Cleaning"
