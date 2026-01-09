@@ -24,7 +24,7 @@ main: main.c matrixlib.c
 	mpicc $(CFLAGS) main.o matrixlib.o -fopenmp -o main $(LIBFLAGS)
 
 run: main
-	mpiexec ./main $(D) $(Z) $(R) $ $(T)
+	mpiexec -n 4 ./main $(D) $(Z) $(R) $ $(T)
 
 clean: main
 	echo "Cleaning"
