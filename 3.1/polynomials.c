@@ -309,6 +309,11 @@ int pol_multiply_parallel(
         MPI_COMM_WORLD
     );
 
+    free(sendcounts);
+    free(displs);
+    sendcounts = NULL;
+    displs = NULL;
+
     // broadcasting all pol2 coefficients
     MPI_Bcast(pol2->coef_arr, deg2 + 1, MPI_INT, 0, MPI_COMM_WORLD);
 
@@ -346,6 +351,19 @@ int pol_multiply_parallel(
         pol_add(prod_i, acc, acc);
         local_idx++;
     }
+
+    if (comm_rank != 0)
+    {
+        pol_destroy(&pol2);
+        pol2 = NULL;
+    }
+
+    free(local_coefs1);
+    free(prod_i);
+    free(prod_i_coef_arr);
+    local_coefs1 = NULL;
+    prod_i = NULL;
+    prod_i_coef_arr = NULL;
 
     if (comm_rank == 0)
     {
