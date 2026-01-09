@@ -1,6 +1,5 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <limits.h>
 #include <time.h>
 #include <mpi.h>
 
@@ -407,7 +406,7 @@ cleanup:
 
 int main(int argc, char *argv[])
 {
-    int comm_size, my_rank;
+    int comm_size, my_rank, was_rank_0 = 0;
     struct timespec start_init, end_init, start_serial, end_serial, start_parallel, end_parallel;
     Polynomial *pol1 = NULL, *pol2 = NULL, *prod1, *prod2;
 
@@ -417,6 +416,7 @@ int main(int argc, char *argv[])
 
     if (my_rank == 0)
     {
+        was_rank_0 = 1;
         timespec_get(&start_init, TIME_UTC);
 
         if (parse_args(argc, argv) == -1)
@@ -441,20 +441,6 @@ int main(int argc, char *argv[])
         timespec_get(&end_init, TIME_UTC);
         printf("Initialization:     %.6f sec\n", elapsed(start_init, end_init));
 
-        timespec_get(&start_serial, TIME_UTC);
-
-        prod1 = pol_multiply(pol1, pol2);
-        if (!prod1)
-        {
-            pol_destroy(&pol1);
-            pol_destroy(&pol2);
-            MPI_Abort(MPI_COMM_WORLD, 1);
-        }
-        //pol_print(prod1);
-
-        timespec_get(&end_serial, TIME_UTC);
-        printf("Serial algorithm:   %.6f sec\n", elapsed(start_serial, end_serial));
-
         timespec_get(&start_parallel, TIME_UTC);
     }
 
@@ -470,12 +456,32 @@ int main(int argc, char *argv[])
         {
             pol_destroy(&pol1);
             pol_destroy(&pol2);
-            pol_destroy(&prod1);
             MPI_Abort(MPI_COMM_WORLD, 1);
         }
         //ol_print(prod2);
 
         timespec_get(&end_parallel, TIME_UTC);
+    }
+    
+    MPI_Finalize();
+
+    // serial test after MPI_Finalize() to avoid any overhead
+    if (was_rank_0)
+    {
+        timespec_get(&start_serial, TIME_UTC);
+
+        prod1 = pol_multiply(pol1, pol2);
+        if (!prod1)
+        {
+            pol_destroy(&pol1);
+            pol_destroy(&pol2);
+            pol_destroy(&prod2);
+            MPI_Abort(MPI_COMM_WORLD, 1);
+        }
+        //pol_print(prod1);
+
+        timespec_get(&end_serial, TIME_UTC);
+        printf("Serial algorithm:   %.6f sec\n", elapsed(start_serial, end_serial));
         printf("Parallel algorithm: %.6f sec\n", elapsed(start_parallel, end_parallel));
 
         if (pol_equals(prod1, prod2))
@@ -488,7 +494,6 @@ int main(int argc, char *argv[])
         pol_destroy(&prod1);
         pol_destroy(&prod2);
     }
-    
-    MPI_Finalize();
+
     return 0;
 }
