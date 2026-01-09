@@ -62,6 +62,7 @@ int main(int argc, char *argv[]) {
 
     // Initializing pointers for later use
     int **mat = NULL;
+    int *mat_mpi = NULL;
     int *vec = NULL;
     int *x = NULL;
     int *serial_res = NULL;
@@ -84,6 +85,7 @@ int main(int argc, char *argv[]) {
     if (my_rank == 0) {
         // Generate matrix for multiplication with values from 0-100
         mat = (int **)malloc(dimension * sizeof(int *));
+        mat_mpi = (int *)malloc(dimension * dimension * sizeof(int));
         for (int x = 0; x < dimension; x++) {
             mat[x] = (int *)malloc(dimension * sizeof(int));
         }
@@ -96,6 +98,7 @@ int main(int argc, char *argv[]) {
                     val = rand_from_range(100);
                 }
                 mat[i][j] = val;
+                mat_mpi[i * dimension + j] = val;
             }
         }
 
@@ -113,6 +116,7 @@ int main(int argc, char *argv[]) {
             }
 
             mat[row][col] = 0;
+            mat_mpi[row * dimension + col] = 0;
         }
 
         // Create vector with random int values
@@ -175,7 +179,7 @@ int main(int argc, char *argv[]) {
         timespec_get(&parallel_CSRrep_start, TIME_UTC);
     }
 
-    parallel_M_rep = CSR_create_mpi(mat, dimension, dimension, non_zero);
+    parallel_M_rep = CSR_create_mpi(mat_mpi, dimension, dimension, non_zero);
 
     if (my_rank == 0) {
         timespec_get(&parallel_CSRrep_finish, TIME_UTC);
@@ -193,7 +197,7 @@ int main(int argc, char *argv[]) {
     }
     x = vec;
     for (int repetition = 0; repetition < reps; repetition++) {
-        parallel_res = mat_vec_mpi(mat, x, dimension, dimension);
+        parallel_res = mat_vec_mpi(mat_mpi, x, dimension, dimension);
         x = parallel_res;
     }
 

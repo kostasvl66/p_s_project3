@@ -104,14 +104,14 @@ void print_array(int *array, int len) {
 /*Parallel execution functions*/
 
 /*Builds the Compressed Sparse Row representation of a sparse matrix using parallel execution*/
-CSR_t CSR_create_mpi(int **matrix, int row, int col, int non_zero) {
+CSR_t CSR_create_mpi(int *matrix, int row, int col, int non_zero) {
     CSR_t csr = {NULL, NULL, NULL};
 
     return csr;
 }
 
 /* Returns the product of multiplication between a matrix and a vector using parallel execution*/
-int *mat_vec_mpi(int **matrix, int *vector, int row, int col) {
+int *mat_vec_mpi(int *matrix, int *vector, int row, int col) {
     int *res_vec = (int *)malloc(col * sizeof(int)); // Vector to store product
     res_vec = NULL;
 
