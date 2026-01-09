@@ -331,6 +331,7 @@ int pol_multiply_parallel(
     acc->coef_arr = acc_coef_arr;
     acc->degree = deg1 + deg2;
 
+    int local_idx = 0;
     for (int i = comm_rank; i <= deg1; i += comm_size)
     {
         prod_i->degree = pol2->degree + i;
@@ -339,10 +340,11 @@ int pol_multiply_parallel(
             if (j < i)
                 prod_i->coef_arr[j] = 0;
             else
-                prod_i->coef_arr[j] = local_coefs1[(i - comm_rank) / comm_size] * pol2->coef_arr[j - i];
+                prod_i->coef_arr[j] = local_coefs1[local_idx] * pol2->coef_arr[j - i];
         }
 
         pol_add(prod_i, acc, acc);
+        local_idx++;
     }
 
     if (comm_rank == 0)
@@ -440,7 +442,7 @@ int main(int argc, char *argv[])
             pol_destroy(&pol2);
             MPI_Abort(MPI_COMM_WORLD, 1);
         }
-        //ol_print(prod2);
+        //pol_print(prod2);
 
         timespec_get(&end_parallel, TIME_UTC);
     }
