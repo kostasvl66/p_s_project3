@@ -1,12 +1,23 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <limits.h>
 #include <time.h>
 #include <mpi.h>
 
 // each polynomial coefficient a non-zero int within [-MAX_ABS_COEFFICIENT_VALUE, +MAX_ABS_COEFFICIENT_VALUE]
 #define MAX_ABS_COEFFICIENT_VALUE 1000
 
-long N;
+// only for local use in pol_multiply_parallel();
+// automates NULL checking and handling for malloc() or calloc() results
+#define SAFE_CALL(call) \
+if (!(call)) \
+{ \
+    success = 0; \
+    goto cleanup; \
+}
+
+int N;
 
 // checks command usage; returns 0 on success, -1 otherwise
 int parse_args(int argc, char *argv[])
@@ -18,13 +29,14 @@ int parse_args(int argc, char *argv[])
     }
         
     char *end;
-    N = strtol(argv[1], &end, 10);
-    if (*end != '\0' || N < 0)
+    long temp_n = strtol(argv[1], &end, 10);
+    if (*end != '\0' || temp_n < 0 || temp_n > INT_MAX)
     {
         fprintf(stderr, "Invalid polynomial degree.\n");
         return -1;
     }
-
+ 
+    N = (int)temp_n;
     return 0;
 }
 
@@ -37,18 +49,18 @@ double elapsed(struct timespec start, struct timespec end)
 typedef struct
 {
     int *coef_arr; // array of coefficients, each index maps to the same power
-    long degree; // the largest power
+    int degree;    // the largest power
 } Polynomial;
 
 // returns a random non-zero coefficient array of length (degree + 1) or NULL if the allocation fails
 // the caller receives ownership of the allocated memory
 // srand() must be called before the function call
-int *generate_random_coef(long degree)
+int *generate_random_coef(int degree)
 {
     int *coef_arr = malloc((degree + 1) * sizeof(int));
     if (!coef_arr) return NULL;
 
-    for (long i = 0; i <= degree; i++)
+    for (int i = 0; i <= degree; i++)
     {
         // making sure each coefficient is non-zero
         int abs_val = 1 + rand() % MAX_ABS_COEFFICIENT_VALUE; // 1 <= abs_val <= MAX_ABS_COEFFICIENT_VALUE
@@ -61,7 +73,7 @@ int *generate_random_coef(long degree)
 
 // initializes a polynomial; returns 0 on success, -1 otherwise
 // coef_arr must be heap allocated and is now owned by pol_init; that array is to be freed by pol_destroy (or pol_init)
-int pol_init(Polynomial **out_pol, int *coef_arr, long degree)
+int pol_init(Polynomial **out_pol, int *coef_arr, int degree)
 {
     *out_pol = malloc(sizeof(Polynomial));
     if (!(*out_pol))
@@ -90,9 +102,9 @@ void pol_destroy(Polynomial **pol)
 // prints a polynomial for test purposes
 void pol_print(Polynomial *pol)
 {
-    for (long i = pol->degree; i >= 0; i--)
+    for (int i = pol->degree; i >= 0; i--)
     {
-        printf("(%d)x^%ld", pol->coef_arr[i], i);
+        printf("(%d)x^%d", pol->coef_arr[i], i);
         if (i > 0)
             printf("+");
         else
@@ -105,7 +117,7 @@ int pol_equals(Polynomial *pol1, Polynomial *pol2)
 {
     if (pol1->degree != pol2->degree) return 0;
     
-    for (long i = 0; i <= pol1->degree; i++)
+    for (int i = 0; i <= pol1->degree; i++)
         if (pol1->coef_arr[i] != pol2->coef_arr[i])
             return 0;
 
@@ -118,11 +130,11 @@ int pol_equals(Polynomial *pol1, Polynomial *pol2)
 void pol_add(Polynomial *pol1, Polynomial *pol2, Polynomial *result)
 {
     // saving degrees in case pol1 or pol2 points to the same memory as result
-    long degree1 = pol1->degree;
-    long degree2 = pol2->degree;
+    int degree1 = pol1->degree;
+    int degree2 = pol2->degree;
 
     Polynomial *max_pol; // polynomial with the largest degree
-    long min_degree; // smallest of the two degrees
+    int min_degree; // smallest of the two degrees
     if (degree1 > degree2)
     {
         result->degree = degree1; // new degree is the largest of the two
@@ -136,10 +148,10 @@ void pol_add(Polynomial *pol1, Polynomial *pol2, Polynomial *result)
         min_degree = degree1;
     }
     
-    for (long i = 0; i <= min_degree; i++)
+    for (int i = 0; i <= min_degree; i++)
         result->coef_arr[i] = pol1->coef_arr[i] + pol2->coef_arr[i];
 
-    for (long i = min_degree + 1; i <= result->degree; i++)
+    for (int i = min_degree + 1; i <= result->degree; i++)
         result->coef_arr[i] = max_pol->coef_arr[i];
 }
 
@@ -168,10 +180,10 @@ Polynomial *pol_multiply(Polynomial *pol1, Polynomial *pol2)
         return NULL;
     }
 
-    for (long i = 0; i <= pol1->degree; i++)
+    for (int i = 0; i <= pol1->degree; i++)
     {
         prod_i.degree = pol2->degree + i;
-        for (long j = 0; j <= prod_i.degree; j++)
+        for (int j = 0; j <= prod_i.degree; j++)
         {
             if (j < i)
                 prod_i.coef_arr[j] = 0;
@@ -202,7 +214,10 @@ int pol_multiply_parallel(
 
     // initializing to NULL for safe cleanup
     Polynomial *res      = NULL;
-    int *local_coef1     = NULL;
+    int *sendcounts      = NULL;
+    int *displs          = NULL;
+    int *packed_chunks   = NULL;
+    int *local_coefs1    = NULL;
     Polynomial *prod_i   = NULL;
     int *prod_i_coef_arr = NULL;
     Polynomial *acc      = NULL;
@@ -224,142 +239,107 @@ int pol_multiply_parallel(
     if (comm_rank == 0)
     {   
         // res is only relevant to rank 0
-        res = malloc(sizeof(Polynomial));
-        if (!res)
-        {
-            success = 0;
-            goto cleanup;
-        }
+        SAFE_CALL(res = malloc(sizeof(Polynomial)));
 
         // new degree is the sum of the two
         res->degree = pol1->degree + pol2->degree;
-        res->coef_arr = calloc(res->degree + 1, sizeof(int)); // initialized at 0
-        if (!(res->coef_arr))
-        {
-            success = 0;
-            goto cleanup;
-        }
+        SAFE_CALL(res->coef_arr = calloc(res->degree + 1, sizeof(int))); // initialized at 0
     }
     else
     {
         // for non-zero ranks, pol2 will store the received coefficients of original pol2
-        pol2 = malloc(sizeof(Polynomial));
-        if (!pol2)
-        {
-            success = 0;
-            goto cleanup;
-        }
-
-        pol2->coef_arr = malloc((deg2 + 1) * sizeof(int));
-        if (!(pol2->coef_arr))
-        {
-            success = 0;
-            goto cleanup;
-        }
+        SAFE_CALL(pol2 = malloc(sizeof(Polynomial)));
+        SAFE_CALL(pol2->coef_arr = malloc((deg2 + 1) * sizeof(int)));
 
         pol2->degree = deg2;
     }
 
-    // assuring that pol1 buffer (to be split) length is perfectly divisible by comm_size
-    if ((deg1 + 1) % comm_size != 0)
-    {
-        if (comm_rank == 0)
-        {
-            fprintf(stderr, "pol1 buffer length not a multiple of comm_size\n");
-            fflush(stdout);
-        }
-        success = 0;
-        goto cleanup;
-    }
-    
-    int local_n1 = (deg1 + 1) / comm_size; // length of local pol1 chunk
-    local_coef1 = malloc(local_n1 * sizeof(int));
-    if (!local_coef1)
-    {
-        success = 0;
-        goto cleanup;
-    }
-
     if (comm_rank == 0)
     {
-        MPI_Scatter(
-            pol1->coef_arr,
-            local_n1,
-            MPI_INT,
-            local_coef1,
-            local_n1,
-            MPI_INT,
-            0,
-            MPI_COMM_WORLD
-        );
+        // preparing to scatter coefficients packed in chunks of common remainder mod comm_size
+        SAFE_CALL(sendcounts = calloc(comm_size, sizeof(int))); // initialized to 0
+        SAFE_CALL(displs = malloc(comm_size * sizeof(int)));
+
+        for (int i = 0; i <= deg1; i++)
+            sendcounts[i % comm_size]++;
+
+        displs[0] = 0;
+        for (int i = 0; i < comm_size; i++)
+            displs[i] = sendcounts[i - 1] + displs[i - 1];
+
+        SAFE_CALL(packed_chunks = malloc((deg1 + 1) * sizeof(int)));
+
+        int *pos; // pos[rank] == index in packed_chunks to place next element that rank gets
+        SAFE_CALL(pos = malloc(comm_size * sizeof(int)));
+        memcpy(pos, displs, comm_size * sizeof(int));
+
+        for (int i = 0; i <= deg1; i++)
+        {
+            packed_chunks[pos[i % comm_size]] = pol1->coef_arr[i];
+            pos[i % comm_size]++;
+        }
+
+        free(pos);
     }
-    else
-    {
-        MPI_Scatter(
-            NULL,
-            local_n1,
-            MPI_INT,
-            local_coef1,
-            local_n1,
-            MPI_INT,
-            0,
-            MPI_COMM_WORLD
-        );
-    }
+
+    // scattering receive counts
+    int local_n1;
+    MPI_Scatter(
+        sendcounts,
+        1, 
+        MPI_INT,
+        &local_n1,
+        1,
+        MPI_INT,
+        0,
+        MPI_COMM_WORLD
+    );
+
+    // getting local coefficients
+    SAFE_CALL(local_coefs1 = malloc(local_n1 * sizeof(int)));
+    MPI_Scatterv(
+        packed_chunks,
+        sendcounts,
+        displs,
+        MPI_INT,
+        local_coefs1,
+        local_n1,
+        MPI_INT,
+        0,
+        MPI_COMM_WORLD
+    );
 
     // broadcasting all pol2 coefficients
     MPI_Bcast(pol2->coef_arr, deg2 + 1, MPI_INT, 0, MPI_COMM_WORLD);
 
     // stores the product of i-th pol1 term and the whole pol2
-    prod_i = malloc(sizeof(Polynomial));
-    if (!prod_i)
-    {
-        success = 0;
-        goto cleanup;
-    }
+    SAFE_CALL(prod_i = malloc(sizeof(Polynomial)));
 
     // stores the coef_arr that will be assigned to prod_i_per_thread[thread]
-    prod_i_coef_arr = malloc((final_deg + 1) * sizeof(int));
-    if (!prod_i_coef_arr)
-    {
-        success = 0;
-        goto cleanup;
-    }
+    SAFE_CALL(prod_i_coef_arr = malloc((final_deg + 1) * sizeof(int)));
 
     // assigning coefficient arrays
     prod_i->coef_arr = prod_i_coef_arr;
 
     // stores an accumulator polynomial for partial sums, which are combined in the end to form res
-    acc = malloc(sizeof(Polynomial));
-    if (!acc)
-    {
-        success = 0;
-        goto cleanup;
-    }
+    SAFE_CALL(acc = malloc(sizeof(Polynomial)));
 
     // stores the coef_arr that will be assigned to acc
-    acc_coef_arr = calloc(final_deg + 1, sizeof(int)); // initialized to 0
-    if (!acc_coef_arr)
-    {
-        success = 0;
-        goto cleanup;
-    }
+    SAFE_CALL(acc_coef_arr = calloc(final_deg + 1, sizeof(int))); // initialized to 0
 
     // assigning coefficient arrays and degree (max degree needed)
     acc->coef_arr = acc_coef_arr;
     acc->degree = deg1 + deg2;
 
-    long local_first = comm_rank * local_n1;
-    long local_last = local_first + local_n1 - 1;
-    for (long i = local_first; i <= local_last; i++)
+    for (int i = comm_rank; i <= deg1; i += comm_size)
     {
         prod_i->degree = pol2->degree + i;
-        for (long j = 0; j <= prod_i->degree; j++)
+        for (int j = 0; j <= prod_i->degree; j++)
         {
             if (j < i)
                 prod_i->coef_arr[j] = 0;
             else
-                prod_i->coef_arr[j] = local_coef1[i - local_first] * pol2->coef_arr[j - i];
+                prod_i->coef_arr[j] = local_coefs1[(i - comm_rank) / comm_size] * pol2->coef_arr[j - i];
         }
 
         pol_add(prod_i, acc, acc);
@@ -388,7 +368,9 @@ cleanup:
     free(acc);
     free(prod_i_coef_arr);
     free(prod_i);
-    free(local_coef1);
+    free(local_coefs1);
+    free(displs);
+    free(sendcounts);
     
     if (comm_rank != 0)
         pol_destroy(&pol2);
