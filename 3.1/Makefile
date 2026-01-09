@@ -14,5 +14,8 @@ run-loc: $(PROGRAM)
 run-lab: $(PROGRAM)
 	mpiexec -f ../setup_files/machines -n $(P) ./$(PROGRAM) $(N)
 
+setup:
+	bash ../setup_files/askdate.h
+
 clean:
 	@rm -f $(PROGRAM)
