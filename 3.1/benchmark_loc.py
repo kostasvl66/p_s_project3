@@ -9,8 +9,9 @@ Ns = [1000, 10000, 100000]
 Ms = [1, 2, 4, 8, 15]
 J = 4
 
-EXECUTABLE = "./polynomials"
-LOG_FILE = "benchmark_log.txt"
+EXECUTABLE = "make"
+TARGET = "run-loc"
+LOG_FILE = "loc_benchmark_log.txt"
 
 # -----------------------------
 # FLOAT EXTRACTION REGEX
@@ -41,7 +42,7 @@ with open(LOG_FILE, "w") as log:
 
             for _ in range(J):
                 result = subprocess.run(
-                    [EXECUTABLE, str(N), str(M)],
+                    [EXECUTABLE, TARGET, f"N={N}", f"P={M}"],
                     capture_output=True,
                     text=True
                 )
