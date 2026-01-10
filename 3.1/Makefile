@@ -15,7 +15,7 @@ run-loc: $(PROGRAM)
 # ensuring each rank is assigned to a different core of each node;
 # up to 4 processes per node, which is configured in machines file
 run-lab: $(PROGRAM)
-	mpiexec -f ../setup_files/machines -n $(P) -map-by node -bind-to core ./$(PROGRAM) $(N)
+	mpiexec -f ../setup_files/machines -n $(P) -map-by core -bind-to core ./$(PROGRAM) $(N)
 
 setup:
 	bash ../setup_files/askdate.sh
