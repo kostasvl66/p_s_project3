@@ -26,9 +26,8 @@ with open(LOG_FILE, "w") as log:
     # ---------- HEADER ----------
     header = ["N\\M"]
     for M in Ms:
-        header.append(f"{M}-serial")
-        header.append(f"{M}-parallel")
         header.append(f"{M}-s/p")
+        header.append(f"{M}-eff")
 
     log.write(" ".join(header) + "\n")
 
@@ -54,14 +53,14 @@ with open(LOG_FILE, "w") as log:
 
                 floats = float_regex.findall(result.stdout)
 
-                if len(floats) < 3:
-                    print("ERROR: Less than 3 floats found in output!")
+                if len(floats) < 5:
+                    print("ERROR: Less than 5 floats found in output!")
                     print(result.stdout)
                     sys.exit(1)
 
                 # Take ONLY the LAST TWO floats
-                serial_time = float(floats[-2])
-                parallel_time = float(floats[-1])
+                serial_time = float(floats[-1])
+                parallel_time = float(floats[-2])
 
                 serial_sum += serial_time
                 parallel_sum += parallel_time
@@ -69,9 +68,9 @@ with open(LOG_FILE, "w") as log:
             avg_serial = serial_sum / J
             avg_parallel = parallel_sum / J
 
-            row_values.append(f"{avg_serial:.6f}")
-            row_values.append(f"{avg_parallel:.6f}")
-            row_values.append(f"{(avg_serial / avg_parallel):.6f}")
+            speedup = avg_serial / avg_parallel
+            row_values.append(f"{speedup:.6f}")
+            row_values.append(f"{(speedup / M):.6f}")
 
         log.write(" ".join(row_values) + "\n")
 
