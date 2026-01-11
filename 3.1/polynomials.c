@@ -210,7 +210,10 @@ int pol_multiply_parallel(
     int comm_rank,
     int comm_size
 ) {
-    int success = 1;
+    struct timespec start_phase1, end_phase1, start_phase2, end_phase2, start_phase3, end_phase3;
+    if (comm_rank == 0) timespec_get(&start_phase1, TIME_UTC);
+
+    int success = 1; // flag for detecting errors in cleanup
 
     // initializing to NULL for safe cleanup
     Polynomial *res      = NULL;
@@ -317,6 +320,13 @@ int pol_multiply_parallel(
     // broadcasting all pol2 coefficients
     MPI_Bcast(pol2->coef_arr, deg2 + 1, MPI_INT, 0, MPI_COMM_WORLD);
 
+    if (comm_rank == 0) 
+    {
+        timespec_get(&end_phase1, TIME_UTC);
+        printf("Splitting/sending:   %.6f sec\n", elapsed(start_phase1, end_phase1));
+        timespec_get(&start_phase2, TIME_UTC);
+    }
+
     // stores the product of i-th pol1 term and the whole pol2
     SAFE_CALL(prod_i = malloc(sizeof(Polynomial)));
 
@@ -365,6 +375,13 @@ int pol_multiply_parallel(
     prod_i = NULL;
     prod_i_coef_arr = NULL;
 
+    if (comm_rank == 0) 
+    {
+        timespec_get(&end_phase2, TIME_UTC);
+        printf("Computations:        %.6f sec\n", elapsed(start_phase2, end_phase2));
+        timespec_get(&start_phase3, TIME_UTC);
+    }
+
     if (comm_rank == 0)
     {
         // first adding local acc of itself to res
@@ -381,6 +398,12 @@ int pol_multiply_parallel(
     {
         // sending local accumulated sum
         MPI_Send(acc->coef_arr, acc->degree + 1, MPI_INT, 0, 0, MPI_COMM_WORLD);
+    }
+
+    if (comm_rank == 0) 
+    {
+        timespec_get(&end_phase3, TIME_UTC);
+        printf("Receiving/combining: %.6f sec\n", elapsed(start_phase3, end_phase3));
     }
 
 cleanup:
@@ -409,7 +432,7 @@ cleanup:
 int main(int argc, char *argv[])
 {
     int comm_size, my_rank, was_rank_0 = 0;
-    struct timespec start_init, end_init, start_serial, end_serial, start_parallel, end_parallel;
+    struct timespec start_serial, end_serial, start_parallel, end_parallel;
     Polynomial *pol1 = NULL, *pol2 = NULL, *prod1, *prod2;
 
     MPI_Init(&argc, &argv);
@@ -419,7 +442,6 @@ int main(int argc, char *argv[])
     if (my_rank == 0)
     {
         was_rank_0 = 1;
-        timespec_get(&start_init, TIME_UTC);
 
         if (parse_args(argc, argv) == -1)
             MPI_Abort(MPI_COMM_WORLD, 1);
@@ -439,9 +461,6 @@ int main(int argc, char *argv[])
             MPI_Abort(MPI_COMM_WORLD, 1);
         } 
         //pol_print(pol2);
-
-        timespec_get(&end_init, TIME_UTC);
-        printf("Initialization:     %.6f sec\n", elapsed(start_init, end_init));
 
         timespec_get(&start_parallel, TIME_UTC);
     }
@@ -467,7 +486,7 @@ int main(int argc, char *argv[])
     
     MPI_Finalize();
 
-    // serial test after MPI_Finalize() to avoid any overhead
+    // serial algorithm execution after MPI_Finalize() to avoid any overheads
     if (was_rank_0)
     {
         timespec_get(&start_serial, TIME_UTC);
@@ -483,8 +502,8 @@ int main(int argc, char *argv[])
         //pol_print(prod1);
 
         timespec_get(&end_serial, TIME_UTC);
-        printf("Serial algorithm:   %.6f sec\n", elapsed(start_serial, end_serial));
-        printf("Parallel algorithm: %.6f sec\n", elapsed(start_parallel, end_parallel));
+        printf("Parallel algorithm:  %.6f sec\n", elapsed(start_parallel, end_parallel));
+        printf("Serial algorithm:    %.6f sec\n", elapsed(start_serial, end_serial));
 
         if (pol_equals(prod1, prod2))
             printf("Consistent results\n");
