@@ -192,14 +192,36 @@ int main(int argc, char *argv[]) {
 
     // Receiving product of matrix and vector using parallel execution
     // The product of each repetition is set as the multiplication vector of the next one
+    int row_block = dimension / comm_sz;
+    int col_block = dimension / comm_sz;
+    int row_block_remainder = dimension % comm_sz;
+
+    int *mat_block = malloc(row_block * dimension * sizeof(int));
+    int *priv_vec = malloc(col_block * sizeof(int));
+    int *priv_res = malloc(row_block * sizeof(int));
+
+    // Gathering final result vector from private result vectors of each process
+    if (my_rank == 0) {
+        parallel_res = malloc(dimension * sizeof(int));
+    }
+
+    // Scattering matrix(in contiguous form) from process 0 to the rest
+    MPI_Scatter(mat_mpi, row_block * dimension, MPI_INT, mat_block, row_block * dimension, MPI_INT, 0, MPI_COMM_WORLD);
+
     if (my_rank == 0) {
         timespec_get(&parallel_mult_start, TIME_UTC);
-
-        parallel_res = (int *)malloc(dimension * sizeof(int));
     }
     x = vec;
-    for (int repetition = 0; repetition < reps; repetition++) {
-        parallel_res = mat_vec_mpi(mat_mpi, x, dimension, dimension);
+
+    for (int rep = 0; rep < reps; rep++) {
+        // Scattering vector from process 0 to the rest
+        MPI_Scatter(x, col_block, MPI_INT, priv_vec, col_block, MPI_INT, 0, MPI_COMM_WORLD);
+
+        mat_vec_mpi(mat_block, priv_vec, priv_res, dimension, row_block, dimension, col_block, MPI_COMM_WORLD);
+
+        // Gathering final vector of repetition back into process 0
+        MPI_Gather(priv_res, row_block, MPI_INT, parallel_res, row_block, MPI_INT, 0, MPI_COMM_WORLD);
+
         x = parallel_res;
     }
 
@@ -209,6 +231,11 @@ int main(int argc, char *argv[]) {
         // Storing elapsed time
         parallel_mult_elapsed = time_elapsed(parallel_mult_start, parallel_mult_finish);
     }
+
+    print_array(parallel_res, dimension);
+
+    free(priv_vec);
+    free(priv_res);
 
     // Receiving product of matrix and vector using serial execution
     // The product of each repetition is set as the multiplication vector of the next one
@@ -231,6 +258,8 @@ int main(int argc, char *argv[]) {
 
     // HACK: Comparing CSR reps and result vectors
     if (my_rank == 0) {
+        printf("\n");
+        print_array(serial_res, dimension);
 
         compare_CSR(M_rep, parallel_M_rep, non_zero, dimension);
 

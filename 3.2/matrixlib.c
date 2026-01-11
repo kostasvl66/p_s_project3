@@ -111,10 +111,10 @@ CSR_t CSR_create_mpi(int *matrix, int row, int col, int non_zero) {
 }
 
 /* Returns the product of multiplication between a matrix and a vector using parallel execution*/
-int *mat_vec_mpi(int *matrix_block, int *private_vector, int *private_result, int rows, int row_block, int col, int private_count, MPI_Comm comm) {
+int *mat_vec_mpi(int *matrix_block, int *private_vector, int *private_result, int rows, int row_block, int col, int col_block, MPI_Comm comm) {
     int *vector = (int *)malloc(rows * sizeof(int));
 
-    MPI_Allgather(private_vector, private_count, MPI_INT, vector, private_count, MPI_INT, comm);
+    MPI_Allgather(private_vector, col_block, MPI_INT, vector, col_block, MPI_INT, comm);
 
     for (int private_i = 0; private_i < row_block; private_i++) {
         private_result[private_i] = 0;
@@ -122,7 +122,6 @@ int *mat_vec_mpi(int *matrix_block, int *private_vector, int *private_result, in
             private_result[private_i] = matrix_block[private_i * col + j] * private_vector[j];
         }
     }
-    free(private_vector);
     return 0;
 }
 
