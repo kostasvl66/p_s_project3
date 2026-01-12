@@ -5,7 +5,8 @@ LIBFLAGS = -lm
 D = 1000  #ARRAY_DIMENSION
 Z = 60   #ZERO_PERCENTAGE
 R = 5    #REPETITIONS
-T = 4    #THREAD_NUM
+
+ARGS = $(D) $(Z) $(R)
 
 SAMPLES = 5 #Number of sample executions for test script
 
@@ -24,7 +25,7 @@ main: main.c matrixlib.c
 	mpicc $(CFLAGS) main.o matrixlib.o -fopenmp -o main $(LIBFLAGS)
 
 run: main
-	mpiexec -n 4 ./main $(D) $(Z) $(R) $ $(T)
+	mpiexec -n 4 ./main $(ARGS)
 
 clean: main
 	echo "Cleaning"

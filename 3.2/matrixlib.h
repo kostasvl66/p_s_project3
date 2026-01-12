@@ -33,7 +33,7 @@ void print_array(int *array, int len);
 CSR_t CSR_create_mpi(int *matrix, int row, int col, int non_zero);
 
 /* Returns the product of multiplication between a matrix and a vector using parallel execution*/
-int *mat_vec_mpi(int *matrix_block, int *private_vector, int *private_result, int rows, int row_block, int col, int col_block, MPI_Comm comm);
+int *mat_vec_mpi(int *matrix_block, int *private_vector, int *private_result, int rows, int row_block, int col, int col_block, int process_count, MPI_Comm comm);
 
 /* Returns the product of multiplication between a matrix and a vector using CSR representation, and parallel execution*/
 int *CSR_mat_vec_mpi(CSR_t rep, int *vec, int dimension);

@@ -1,6 +1,6 @@
 #include "matrixlib.h"
 
-extern int threads;
+extern int process_count;
 
 /*Builds the Compressed Sparse Row representation of a sparse matrix*/
 CSR_t CSR_create(int **matrix, int row, int col, int non_zero) {
@@ -111,15 +111,30 @@ CSR_t CSR_create_mpi(int *matrix, int row, int col, int non_zero) {
 }
 
 /* Returns the product of multiplication between a matrix and a vector using parallel execution*/
-int *mat_vec_mpi(int *matrix_block, int *private_vector, int *private_result, int rows, int row_block, int col, int col_block, MPI_Comm comm) {
+int *mat_vec_mpi(int *matrix_block, int *private_vector, int *private_result, int rows, int row_block, int col, int col_block, int process_count, MPI_Comm comm) {
     int *vector = (int *)malloc(rows * sizeof(int));
 
-    MPI_Allgather(private_vector, col_block, MPI_INT, vector, col_block, MPI_INT, comm);
+    int *recvcounts = malloc(process_count * sizeof(int));
+    int *recv_displacements = malloc(process_count * sizeof(int));
+
+    int base_block = rows / process_count;
+    int remainder = rows % process_count;
+
+    int current_recv_disp = 0;
+    for (int i = 0; i < process_count; i++) {
+        int rows_per_process = base_block + (i < remainder ? 1 : 0);
+
+        recvcounts[i] = rows_per_process;
+        recv_displacements[i] = current_recv_disp;
+        current_recv_disp += recvcounts[i];
+    }
+
+    MPI_Allgatherv(private_vector, col_block, MPI_INT, vector, recvcounts, recv_displacements, MPI_INT, comm);
 
     for (int private_i = 0; private_i < row_block; private_i++) {
         private_result[private_i] = 0;
         for (int j = 0; j < col; j++) {
-            private_result[private_i] = matrix_block[private_i * col + j] * private_vector[j];
+            private_result[private_i] += matrix_block[private_i * col + j] * private_vector[j];
         }
     }
     return 0;
