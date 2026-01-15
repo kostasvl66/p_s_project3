@@ -27,12 +27,6 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // MPI initialization
-    int my_rank;
-    MPI_Init(&argc, &argv);
-    MPI_Comm_size(MPI_COMM_WORLD, &process_count);
-    MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
-
     // Receiving program inputs
     int dimension = atoi(argv[1]);       // Matrix dimension
     int zero_percentage = atoi(argv[2]); // Percentage of matrix elements with a value of 0
@@ -56,6 +50,12 @@ int main(int argc, char *argv[]) {
 
     // Seeding rand for consistent results during program execution
     srand(1);
+
+    // MPI initialization
+    int my_rank;
+    MPI_Init(&argc, &argv);
+    MPI_Comm_size(MPI_COMM_WORLD, &process_count);
+    MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
 
     // Useful values
     int total_values = dimension * dimension;
@@ -93,8 +93,9 @@ int main(int argc, char *argv[]) {
                 while (val == 0) {
                     val = rand_from_range(100);
                 }
-                mat[i][j] = val;
-                mat_mpi[i * dimension + j] = val;
+                //Matrix is allocated both in 2D(contiguous) and 1D form
+                mat[i][j] = val; //2D Matrix used in serial execution
+                mat_mpi[i * dimension + j] = val; //1D Matrix(Array/Vector) used in parallel MPI execution
             }
         }
 
@@ -153,7 +154,7 @@ int main(int argc, char *argv[]) {
         // Storing elapsed time
         serial_mult_elapsed = time_elapsed(serial_mult_start, serial_mult_finish);
 
-        // Receiving product of matrix and vector using serial execution
+        // Receiving product of CSR and vector using serial execution
         // The product of each repetition is set as the multiplication vector of the next one
         timespec_get(&serial_CSRmult_start, TIME_UTC);
         serial_CSRres = (int *)malloc(dimension * sizeof(int));
@@ -169,30 +170,20 @@ int main(int argc, char *argv[]) {
     }
 
     /* -------------------- Parallel program execution -------------------- */
-
     // Base number of lines per process, not taking remainder into account
     int base_block = dimension / process_count;
 
-    // Calculating remainder of rows and distributing them evenly across all processes
+    //Remaining rows/columns when the total number is not divisible by the number of processes used 
     int row_block_remainder = dimension % process_count;
-    int row_block = base_block + (my_rank < row_block_remainder ? 1 : 0);
-
-    // Calculating remainder of columns and distributing them evenly across all processes
     int col_block_remainder = dimension % process_count;
+
+    //Blocks of rows/columns being supplied to all processes, reducing memory usage as opposed to suplying an entire matrix/vector
+    //Any remainder rows are distributed evenly across processes 
+    int row_block = base_block + (my_rank < row_block_remainder ? 1 : 0);
     int col_block = base_block + (my_rank < col_block_remainder ? 1 : 0);
 
-    // Allocating memory for arrays used in multiplication
+    // Allocating memory for block of matrix rows
     int *mat_block = malloc(row_block * dimension * sizeof(int));
-
-    // Allocating global struct to receive the final CSR representation
-    CSR_t global_csr = NULL_CSR;
-
-    if (my_rank == 0) {
-        global_csr.col_array = malloc(non_zero * sizeof(int));
-        global_csr.val_array = malloc(non_zero * sizeof(int));
-        global_csr.start_idx = malloc((dimension + 1) * sizeof(int));
-        global_csr.start_idx[dimension] = non_zero;
-    }
 
     // Private CSR used by each process
     CSR_t private_csr = NULL_CSR;
@@ -200,10 +191,18 @@ int main(int argc, char *argv[]) {
     // Arrays to be used as arguments in Scatterv
     int *sendcounts = NULL;
     int *send_displacements = NULL;
+    int *idx_recvcounts = NULL;
+    int *idx_displacements = NULL;
+    int *nzcounts = NULL;
 
     if (my_rank == 0) {
         sendcounts = malloc(process_count * sizeof(int));
         send_displacements = malloc(process_count * sizeof(int));
+        idx_recvcounts = malloc(process_count * sizeof(int));
+        idx_displacements = malloc(process_count * sizeof(int));
+        nzcounts = malloc(process_count * sizeof(int));
+
+        int current_disp = 0;
 
         int current_send_disp = 0;
 
@@ -214,18 +213,72 @@ int main(int argc, char *argv[]) {
             sendcounts[i] = row_block_per_process * dimension;
             send_displacements[i] = current_send_disp;
             current_send_disp += sendcounts[i];
+
+            // Counts of non-zero elements per row to be gathered into global start_idx 
+            idx_recvcounts[i] = row_block_per_process;
+            idx_displacements[i] = current_disp;
+            current_disp += idx_recvcounts[i];
         }
     }
 
     // Scattering matrix(in contiguous form) from process 0 to the rest
     MPI_Scatterv(mat_mpi, sendcounts, send_displacements, MPI_INT, mat_block, row_block * dimension, MPI_INT, 0, MPI_COMM_WORLD);
 
-    // Create CSR representation of sparse matrix using parallel execution
     if (my_rank == 0) {
         timespec_get(&parallel_CSRrep_start, TIME_UTC);
+
+        // Allocating lists for resulting CSR representation
+        parallel_M_rep.start_idx = malloc((dimension + 1) * sizeof(int));
+        parallel_M_rep.val_array = malloc(non_zero * sizeof(int));
+        parallel_M_rep.col_array = malloc(non_zero * sizeof(int));
+        parallel_M_rep.start_idx[dimension] = non_zero;
     }
 
+    // Create CSR representation of sparse matrix using parallel execution
     CSR_create_mpi(mat_block, &private_csr, dimension, row_block, dimension, process_count, MPI_COMM_WORLD);
+
+    //Gathering list of total non-zero elements collected per process
+    int private_nzcount = private_csr.start_idx[row_block];
+    MPI_Gather(&private_nzcount, 1, MPI_INT, nzcounts, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+    // Gathering list of row-start indexes
+    MPI_Gatherv(private_csr.start_idx, row_block, MPI_INT, parallel_M_rep.start_idx, idx_recvcounts, idx_displacements, MPI_INT, 0, MPI_COMM_WORLD);
+
+    // Processing list of row start indexes
+    // This step is required as each process has its own separate list of row start indexes, 
+    // where the offset of each element is relative to the block of rows specific to said process
+    if (my_rank == 0) {
+        int global_current_offset = 0;
+        for (int i = 0; i < process_count; i++) {
+            int rows_per_process = idx_recvcounts[i];
+            int global_disp = idx_displacements[i];
+
+            for (int x = 0; x < rows_per_process; x++) {
+                parallel_M_rep.start_idx[global_disp + x] += global_current_offset;
+            }
+
+            global_current_offset += nzcounts[i];
+        }
+    }
+
+    //Calculating displacements of non-zero value counts per process
+    int *nz_displacements = NULL;
+
+    if (my_rank == 0) {
+        nz_displacements = malloc(process_count * sizeof(int));
+
+        int current_disp = 0;
+
+        for (int i = 0; i < process_count; i++) {
+            nz_displacements[i] = current_disp;
+            current_disp += nzcounts[i];
+        }
+
+    }
+
+    // Gathering list of non-zero values and their respective columns
+    MPI_Gatherv(private_csr.val_array, private_nzcount, MPI_INT, parallel_M_rep.val_array, nzcounts, nz_displacements, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Gatherv(private_csr.col_array, private_nzcount, MPI_INT, parallel_M_rep.col_array, nzcounts, nz_displacements, MPI_INT, 0, MPI_COMM_WORLD);
 
     if (my_rank == 0) {
         timespec_get(&parallel_CSRrep_finish, TIME_UTC);
@@ -233,41 +286,21 @@ int main(int argc, char *argv[]) {
         // Storing elapsed time
         parallel_CSR_elapsed = time_elapsed(parallel_CSRrep_start, parallel_CSRrep_finish);
     }
-    int *idx_recvcounts;
-    int *idx_displacements;
-
+    
     if (my_rank == 0) {
-        idx_recvcounts = malloc(process_count * sizeof(int));
-        idx_displacements = malloc(process_count * sizeof(int));
-
-        int current_disp = 0;
-
-        for (int i = 0; i < process_count; i++) {
-            int row_block_per_process = base_block + (i < row_block_remainder ? 1 : 0);
-
-            idx_recvcounts[i] = row_block_per_process;
-            idx_displacements[i] = current_disp;
-            current_disp += idx_recvcounts[i];
-        }
+        timespec_get(&parallel_mult_start, TIME_UTC);
     }
 
-    // Gathering list of row-start indexes
-    MPI_Gatherv(private_csr.start_idx, row_block, MPI_INT, global_csr.start_idx, idx_recvcounts, idx_displacements, MPI_INT, 0, MPI_COMM_WORLD);
-
-    // Receiving product of matrix and vector using parallel execution
-    // The product of each repetition is set as the multiplication vector of the next one
-
-    free(mat_block);
-    mat_block = malloc(row_block * dimension * sizeof(int));
+    // Allocating vector block to be used by each process privately
     int *priv_vec = malloc(col_block * sizeof(int));
+
+    // Allocating result vector block to be used by each process privately
     int *priv_res = malloc(row_block * sizeof(int));
 
-    // Allocating result vector for each repetition
+    // Allocating final result vector
     if (my_rank == 0) {
         parallel_res = malloc(dimension * sizeof(int));
     }
-
-    // Scatterv/Gatherv initial setup
 
     // Arrays to be used as arguments in Gatherv
     int *recvcounts = NULL;
@@ -292,14 +325,9 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    // Scattering matrix(in contiguous form) from process 0 to the rest
-    MPI_Scatterv(mat_mpi, sendcounts, send_displacements, MPI_INT, mat_block, row_block * dimension, MPI_INT, 0, MPI_COMM_WORLD);
-
-    if (my_rank == 0) {
-        timespec_get(&parallel_mult_start, TIME_UTC);
-    }
+    // Receiving product of matrix and vector using parallel execution
+    // The product of each repetition is set as the multiplication vector of the next one
     x = vec;
-
     for (int rep = 0; rep < reps; rep++) {
         // Scattering vector from process 0 to the rest
         MPI_Scatterv(x, recvcounts, recv_displacements, MPI_INT, priv_vec, col_block, MPI_INT, 0, MPI_COMM_WORLD);
@@ -312,6 +340,10 @@ int main(int argc, char *argv[]) {
         x = parallel_res;
     }
 
+    free(priv_vec);
+    free(priv_res);
+    free(mat_block);
+
     if (my_rank == 0) {
         timespec_get(&parallel_mult_finish, TIME_UTC);
 
@@ -319,11 +351,7 @@ int main(int argc, char *argv[]) {
         parallel_mult_elapsed = time_elapsed(parallel_mult_start, parallel_mult_finish);
     }
 
-    free(priv_vec);
-    free(priv_res);
-    free(mat_block);
-
-    // Receiving product of matrix and vector using serial execution
+    // Receiving product of CSR and vector using parallel execution
     // The product of each repetition is set as the multiplication vector of the next one
     if (my_rank == 0) {
         timespec_get(&parallel_CSRmult_start, TIME_UTC);
@@ -346,11 +374,14 @@ int main(int argc, char *argv[]) {
     if (my_rank == 0) {
         printf("Result vectors of serial and parallel multiplication: ");
         compare_array(serial_res, parallel_res, dimension);
-        print_array(serial_res, dimension);
-        print_array(parallel_res, dimension);
+        // print_array(serial_res, dimension);
+        // print_array(parallel_res, dimension);
         printf("\n");
 
+        printf("Result CSR of serial and parallel creation:\n");
         compare_CSR(M_rep, parallel_M_rep, non_zero, dimension);
+        printf("\n");
+
 
         printf("Result vectors of serial and parallel CSR multiplication: ");
         compare_array(serial_CSRres, parallel_CSRres, dimension);
@@ -358,7 +389,6 @@ int main(int argc, char *argv[]) {
     }
 
     if (my_rank == 0) {
-        printf("File operation\n");
         // Writing data to external file
         FILE *fd;
         fd = fopen("test_data.txt", "a");
@@ -366,7 +396,7 @@ int main(int argc, char *argv[]) {
             perror("Error opening file");
         }
 
-        int program_parameters[4] = {
+        int program_parameters[3] = {
             dimension,       // Matrix dimension
             zero_percentage, // Percentage of matrix elements with a value of 0
             reps,            // Number of times multiplication is repeated
