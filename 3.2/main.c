@@ -5,8 +5,6 @@
 #include <stdlib.h>
 #include <time.h>
 
-#define NULL_CSR {NULL, NULL, NULL}
-
 int process_count;
 
 /*Returns a random number in the range 0 - <range_max>*/
@@ -28,6 +26,13 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Or as(using default values) -> make run\n");
         return 1;
     }
+
+    // MPI initialization
+    int my_rank;
+    MPI_Init(&argc, &argv);
+    MPI_Comm_size(MPI_COMM_WORLD, &process_count);
+    MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
+
     // Receiving program inputs
     int dimension = atoi(argv[1]);       // Matrix dimension
     int zero_percentage = atoi(argv[2]); // Percentage of matrix elements with a value of 0
@@ -70,14 +75,6 @@ int main(int argc, char *argv[]) {
     int *parallel_res = NULL;
     int *parallel_CSRres = NULL;
     CSR_t parallel_M_rep = NULL_CSR;
-
-    // MPI initialization
-    int my_rank;
-    MPI_Init(&argc, &argv);
-    MPI_Comm_size(MPI_COMM_WORLD, &process_count);
-    MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
-
-    printf("Processes:%d\n", process_count);
 
     /* -------------------- Matrix/vector allocation -------------------- */
 
@@ -173,12 +170,62 @@ int main(int argc, char *argv[]) {
 
     /* -------------------- Parallel program execution -------------------- */
 
+    // Base number of lines per process, not taking remainder into account
+    int base_block = dimension / process_count;
+
+    // Calculating remainder of rows and distributing them evenly across all processes
+    int row_block_remainder = dimension % process_count;
+    int row_block = base_block + (my_rank < row_block_remainder ? 1 : 0);
+
+    // Calculating remainder of columns and distributing them evenly across all processes
+    int col_block_remainder = dimension % process_count;
+    int col_block = base_block + (my_rank < col_block_remainder ? 1 : 0);
+
+    // Allocating memory for arrays used in multiplication
+    int *mat_block = malloc(row_block * dimension * sizeof(int));
+
+    // Allocating global struct to receive the final CSR representation
+    CSR_t global_csr = NULL_CSR;
+
+    if (my_rank == 0) {
+        global_csr.col_array = malloc(non_zero * sizeof(int));
+        global_csr.val_array = malloc(non_zero * sizeof(int));
+        global_csr.start_idx = malloc((dimension + 1) * sizeof(int));
+        global_csr.start_idx[dimension] = non_zero;
+    }
+
+    // Private CSR used by each process
+    CSR_t private_csr = NULL_CSR;
+
+    // Arrays to be used as arguments in Scatterv
+    int *sendcounts = NULL;
+    int *send_displacements = NULL;
+
+    if (my_rank == 0) {
+        sendcounts = malloc(process_count * sizeof(int));
+        send_displacements = malloc(process_count * sizeof(int));
+
+        int current_send_disp = 0;
+
+        for (int i = 0; i < process_count; i++) {
+            int row_block_per_process = base_block + (i < row_block_remainder ? 1 : 0);
+
+            // Rows to be scattered from matrix
+            sendcounts[i] = row_block_per_process * dimension;
+            send_displacements[i] = current_send_disp;
+            current_send_disp += sendcounts[i];
+        }
+    }
+
+    // Scattering matrix(in contiguous form) from process 0 to the rest
+    MPI_Scatterv(mat_mpi, sendcounts, send_displacements, MPI_INT, mat_block, row_block * dimension, MPI_INT, 0, MPI_COMM_WORLD);
+
     // Create CSR representation of sparse matrix using parallel execution
     if (my_rank == 0) {
         timespec_get(&parallel_CSRrep_start, TIME_UTC);
     }
 
-    parallel_M_rep = CSR_create_mpi(mat_mpi, dimension, dimension, non_zero);
+    CSR_create_mpi(mat_block, &private_csr, dimension, row_block, dimension, process_count, MPI_COMM_WORLD);
 
     if (my_rank == 0) {
         timespec_get(&parallel_CSRrep_finish, TIME_UTC);
@@ -186,22 +233,36 @@ int main(int argc, char *argv[]) {
         // Storing elapsed time
         parallel_CSR_elapsed = time_elapsed(parallel_CSRrep_start, parallel_CSRrep_finish);
     }
+    int *idx_recvcounts;
+    int *idx_displacements;
+
+    if (my_rank == 0) {
+        idx_recvcounts = malloc(process_count * sizeof(int));
+        idx_displacements = malloc(process_count * sizeof(int));
+
+        int current_disp = 0;
+
+        for (int i = 0; i < process_count; i++) {
+            int row_block_per_process = base_block + (i < row_block_remainder ? 1 : 0);
+
+            idx_recvcounts[i] = row_block_per_process;
+            idx_displacements[i] = current_disp;
+            current_disp += idx_recvcounts[i];
+        }
+    }
+
+    // Gathering list of row-start indexes
+    MPI_Gatherv(private_csr.start_idx, row_block, MPI_INT, global_csr.start_idx, idx_recvcounts, idx_displacements, MPI_INT, 0, MPI_COMM_WORLD);
+
+    if (my_rank == 0) {
+        print_array(global_csr.start_idx, dimension + 1);
+    }
 
     // Receiving product of matrix and vector using parallel execution
     // The product of each repetition is set as the multiplication vector of the next one
 
-    int base_block = dimension / process_count; // Base number of lines per process, not taking remainder into account
-
-    // Calculateing remainder of rows and distributing them evenly across all processes
-    int row_block_remainder = dimension % process_count;
-    int row_block = base_block + (my_rank < row_block_remainder ? 1 : 0);
-
-    // Calculateing remainder of columns and distributing them evenly across all processes
-    int col_block_remainder = dimension % process_count;
-    int col_block = base_block + (my_rank < col_block_remainder ? 1 : 0);
-
-    // Allocating memory for arrays used in multiplication
-    int *mat_block = malloc(row_block * dimension * sizeof(int));
+    free(mat_block);
+    mat_block = malloc(row_block * dimension * sizeof(int));
     int *priv_vec = malloc(col_block * sizeof(int));
     int *priv_res = malloc(row_block * sizeof(int));
 
@@ -212,33 +273,21 @@ int main(int argc, char *argv[]) {
 
     // Scatterv/Gatherv initial setup
 
-    // Arrays to be used as arguments in Scatterv
-    int *sendcounts = NULL;
-    int *send_displacements = NULL;
-
     // Arrays to be used as arguments in Gatherv
     int *recvcounts = NULL;
     int *recv_displacements = NULL;
 
     if (my_rank == 0) {
         // Allocating arrays
-        sendcounts = malloc(process_count * sizeof(int));
-        send_displacements = malloc(process_count * sizeof(int));
         recvcounts = malloc(process_count * sizeof(int));
         recv_displacements = malloc(process_count * sizeof(int));
 
-        int current_send_disp = 0;
         int current_recv_disp = 0;
 
         // Per the number of processes, finding the number of rows each process must calculate
         // and setting each element of sendcounts to said value, making sure the displacements are also set.
         for (int i = 0; i < process_count; i++) {
             int row_block_per_process = base_block + (i < row_block_remainder ? 1 : 0);
-
-            // Rows to be scattered from matrix
-            sendcounts[i] = row_block_per_process * dimension;
-            send_displacements[i] = current_send_disp;
-            current_send_disp += sendcounts[i];
 
             // Rows to be scattered from vector
             recvcounts[i] = row_block_per_process;
@@ -313,7 +362,7 @@ int main(int argc, char *argv[]) {
     }
 
     if (my_rank == 0) {
-
+        printf("File operation\n");
         // Writing data to external file
         FILE *fd;
         fd = fopen("test_data.txt", "a");

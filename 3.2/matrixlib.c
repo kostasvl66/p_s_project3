@@ -1,4 +1,5 @@
 #include "matrixlib.h"
+#include <stdlib.h>
 
 extern int process_count;
 
@@ -74,6 +75,10 @@ void print_matrix(int **matrix, int row, int col) {
 
 /*Prints a CSR representation to terminal*/
 void print_CSR(CSR_t csr, int rows) {
+    if (csr.start_idx == NULL || csr.val_array == NULL || csr.col_array == NULL) {
+        printf("NULL CSR can't be printed.\n");
+        return;
+    }
     int nz_num = csr.start_idx[rows];
     printf("Values\t");
     for (int i = 0; i < nz_num; i++) {
@@ -96,6 +101,10 @@ void print_CSR(CSR_t csr, int rows) {
 
 /*Prints the elements of an integer array*/
 void print_array(int *array, int len) {
+    if (array == NULL) {
+        printf("NULL array can't be printed.\n");
+        return;
+    }
     for (int i = 0; i < len; i++) {
         printf("%d\t", array[i]);
     }
@@ -104,10 +113,54 @@ void print_array(int *array, int len) {
 /*Parallel execution functions*/
 
 /*Builds the Compressed Sparse Row representation of a sparse matrix using parallel execution*/
-CSR_t CSR_create_mpi(int *matrix, int row, int col, int non_zero) {
-    CSR_t csr = {NULL, NULL, NULL};
+int CSR_create_mpi(int *matrix_block, CSR_t *private_csr, int row, int row_block, int col, int process_count, MPI_Comm comm) {
+    // Create CSR object in main, allocate arrays, input object as pointer into function
 
-    return csr;
+    // Initializing first element of index list as 0
+    private_csr->start_idx = (int *)malloc((row_block + 1) * sizeof(int));
+    int *start_idx = private_csr->start_idx;
+
+    start_idx[0] = 0;
+
+    int total_nz_count = 0;
+
+    for (int i = 0; i < row_block; i++) {
+        int nz_per_line = 0; // Initializing a counter of non-zero elements in each row of the matrix
+        for (int j = 0; j < col; j++) {
+            if (matrix_block[i * col + j] != 0) {
+                nz_per_line++;
+            }
+        }
+        total_nz_count += nz_per_line;
+        start_idx[i + 1] = nz_per_line; // The count of each line is stored in the index after its own
+    }
+
+    private_csr->val_array = (int *)malloc(total_nz_count * sizeof(int));
+    private_csr->col_array = (int *)malloc(total_nz_count * sizeof(int));
+
+    int *val_array = private_csr->val_array;
+    int *col_array = private_csr->col_array;
+
+    for (int x = 0; x < row_block; x++) {
+        // The count of each line must have the count of the previous one added to it
+        // This is so that each index contains an accurate pointer to the very first element of each line
+        start_idx[x + 1] += start_idx[x];
+    }
+
+    for (int i = 0; i < row_block; i++) {
+        // Starting each line from the first non-zero element, as calcualted earlier
+        int current_idx = start_idx[i];
+        for (int j = 0; j < col; j++) {
+            int val = matrix_block[i * col + j];
+            if (val != 0) {
+                val_array[current_idx] = val; // Storing non-zero value
+                col_array[current_idx] = j;   // Storing non-zero value's column index
+                current_idx++;                // Incrementing index
+            }
+        }
+    }
+
+    return 0;
 }
 
 /* Returns the product of multiplication between a matrix and a vector using parallel execution*/

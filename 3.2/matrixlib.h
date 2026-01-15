@@ -2,6 +2,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#define NULL_CSR \
+    (CSR_t) { NULL, NULL, NULL }
+
 /* Structure used to contain a Compressed Sparse Row representation of a sparse matrix*/
 typedef struct CSR {
     int *val_array; // Array of non-zero values in the matrix
@@ -30,7 +33,7 @@ void print_array(int *array, int len);
 /*Parallel implementations using OpenMP*/
 
 /*Builds the Compressed Sparse Row representation of a sparse matrix using parallel execution*/
-CSR_t CSR_create_mpi(int *matrix, int row, int col, int non_zero);
+int CSR_create_mpi(int *matrix_block, CSR_t *private_csr, int row, int row_block, int col, int process_count, MPI_Comm comm);
 
 /* Returns the product of multiplication between a matrix and a vector using parallel execution*/
 int *mat_vec_mpi(int *matrix_block, int *private_vector, int *private_result, int rows, int row_block, int col, int col_block, int process_count, MPI_Comm comm);
