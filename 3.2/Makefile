@@ -19,14 +19,14 @@ test: compile-test
 compile-test: test.c
 	gcc $(CFLAGS) test.c -o test
 
-main: main.c matrixlib.c
+compile: main.c matrixlib.c
 	mpicc $(CFLAGS) -c main.c -fopenmp -o main.o
 	mpicc $(CFLAGS) -c matrixlib.c -fopenmp -o matrixlib.o
 	mpicc $(CFLAGS) main.o matrixlib.o -fopenmp -o main $(LIBFLAGS)
 
-run: main
+run: compile
 	mpiexec -n 4 ./main $(ARGS)
 
-clean: main
+clean: main.o matrixlib.o test_data.txt main
 	echo "Cleaning"
-	rm main
+	rm main main.o matrixlib.o test_data.txt

@@ -187,7 +187,7 @@ int *mat_vec_mpi(int *matrix_block, int *private_vector, int *private_result, in
     for (int private_i = 0; private_i < row_block; private_i++) {
         private_result[private_i] = 0;
         for (int j = 0; j < col; j++) {
-            private_result[private_i] += matrix_block[private_i * col + j] * private_vector[j];
+            private_result[private_i] += matrix_block[private_i * col + j] * vector[j];
         }
     }
     return 0;
