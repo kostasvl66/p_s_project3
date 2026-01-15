@@ -5,7 +5,6 @@ enum parameter_names {
     dimension,       // Matrix dimension
     zero_percentage, // Percentage of matrix elements with a value of 0
     reps,            // Number of times multiplication is repeated
-    threads,         // Number of threads used for parallel execution
 };
 
 enum output_times {
@@ -30,12 +29,12 @@ int main(int argc, char *argv[]) {
         perror("Error opening file");
     }
 
-    int parameters[4];
+    int parameters[3];
     double averages[6] = {0}, temp;
 
     // Reading program outputs samples times and storing their averages
     for (int sample = 0; sample < samples; sample++) {
-        for (int param = 0; param < 4; param++) {
+        for (int param = 0; param < 3; param++) {
             fscanf(fd, "%d", &parameters[param]);
         }
         for (int output = 0; output < 6; output++) {
@@ -50,7 +49,6 @@ int main(int argc, char *argv[]) {
     printf("Array dimension: %d ", parameters[dimension]);
     printf("Zero_percentage: %d ", parameters[zero_percentage]);
     printf("Repetitions: %d ", parameters[reps]);
-    printf("Threads: %d\n\n", parameters[threads]);
 
     printf("Average time calculations for %d sample executions are:\n", samples);
     printf("Serial matrix-vector multiplication: %lf\n", averages[serial_mult_avg]);
