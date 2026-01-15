@@ -254,10 +254,6 @@ int main(int argc, char *argv[]) {
     // Gathering list of row-start indexes
     MPI_Gatherv(private_csr.start_idx, row_block, MPI_INT, global_csr.start_idx, idx_recvcounts, idx_displacements, MPI_INT, 0, MPI_COMM_WORLD);
 
-    if (my_rank == 0) {
-        print_array(global_csr.start_idx, dimension + 1);
-    }
-
     // Receiving product of matrix and vector using parallel execution
     // The product of each repetition is set as the multiplication vector of the next one
 
@@ -350,8 +346,8 @@ int main(int argc, char *argv[]) {
     if (my_rank == 0) {
         printf("Result vectors of serial and parallel multiplication: ");
         compare_array(serial_res, parallel_res, dimension);
-        // print_array(serial_res, dimension);
-        // print_array(parallel_res, dimension);
+        print_array(serial_res, dimension);
+        print_array(parallel_res, dimension);
         printf("\n");
 
         compare_CSR(M_rep, parallel_M_rep, non_zero, dimension);
