@@ -114,8 +114,6 @@ void print_array(int *array, int len) {
 
 /*Builds the Compressed Sparse Row representation of a sparse matrix using parallel execution*/
 int CSR_create_mpi(int *matrix_block, CSR_t *private_csr, int row, int row_block, int col, int process_count, MPI_Comm comm) {
-    // Create CSR object in main, allocate arrays, input object as pointer into function
-
     // Initializing first element of index list as 0
     private_csr->start_idx = (int *)malloc((row_block + 1) * sizeof(int));
     int *start_idx = private_csr->start_idx;
@@ -165,6 +163,10 @@ int CSR_create_mpi(int *matrix_block, CSR_t *private_csr, int row, int row_block
 
 /* Returns the product of multiplication between a matrix and a vector using parallel execution*/
 int *mat_vec_mpi(int *matrix_block, int *private_vector, int *private_result, int rows, int row_block, int col, int col_block, int process_count, MPI_Comm comm) {
+    // Gathering vector for multiplication in all processes using MPI_Allgatherv.
+    // MPI_Allgatherv is preferred over MPI_Allgather in cases where the number of
+    // matrix rows is not divisible by the number of processes.
+    // Scattering is also performed by MPI_Scatterv for the same reason.
     int *vector = (int *)malloc(rows * sizeof(int));
 
     int *recvcounts = malloc(process_count * sizeof(int));
@@ -184,6 +186,8 @@ int *mat_vec_mpi(int *matrix_block, int *private_vector, int *private_result, in
 
     MPI_Allgatherv(private_vector, col_block, MPI_INT, vector, recvcounts, recv_displacements, MPI_INT, comm);
 
+    // Multiplication is performed using the process-specific matrix block, as it was 
+    // scattered by main, and the multiplication vector as it was acquired by MPI_Allgatherv.
     for (int private_i = 0; private_i < row_block; private_i++) {
         private_result[private_i] = 0;
         for (int j = 0; j < col; j++) {
