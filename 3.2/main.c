@@ -32,6 +32,13 @@ int main(int argc, char *argv[]) {
     int zero_percentage = atoi(argv[2]); // Percentage of matrix elements with a value of 0
     int reps = atoi(argv[3]);            // Number of times multiplication is repeated
 
+    // Useful values
+    int total_values = dimension * dimension;
+    int zeroes = ceil(total_values * zero_percentage / 100.0);
+
+    // Calculating number of non-zero values in the matrix
+    int non_zero = total_values - zeroes;
+    
     // Timespec initialization
     struct timespec serial_CSRrep_start, serial_CSRrep_finish;
     struct timespec serial_mult_start, serial_mult_finish;
@@ -57,14 +64,7 @@ int main(int argc, char *argv[]) {
     MPI_Comm_size(MPI_COMM_WORLD, &process_count);
     MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
 
-    // Useful values
-    int total_values = dimension * dimension;
-    int zeroes = ceil(total_values * zero_percentage / 100.0);
-
-    // Calculating number of non-zero values in the matrix
-    int non_zero = total_values - zeroes;
-
-    // Initializing pointers for later use
+    // Initializing values for later use
     int **mat = NULL;
     int *mat_mpi = NULL;
     int *vec = NULL;
@@ -173,12 +173,12 @@ int main(int argc, char *argv[]) {
     // Base number of lines per process, not taking remainder into account
     int base_block = dimension / process_count;
 
-    //Remaining rows/columns when the total number is not divisible by the number of processes used 
+    // Remaining rows/columns when the total number is not divisible by the number of processes used 
     int row_block_remainder = dimension % process_count;
     int col_block_remainder = dimension % process_count;
 
-    //Blocks of rows/columns being supplied to all processes, reducing memory usage as opposed to suplying an entire matrix/vector
-    //Any remainder rows are distributed evenly across processes 
+    // Blocks of rows/columns being supplied to all processes, reducing memory usage as opposed to suplying an entire matrix/vector
+    // Any remainder rows are distributed evenly across processes 
     int row_block = base_block + (my_rank < row_block_remainder ? 1 : 0);
     int col_block = base_block + (my_rank < col_block_remainder ? 1 : 0);
 
@@ -237,7 +237,7 @@ int main(int argc, char *argv[]) {
     // Create CSR representation of sparse matrix using parallel execution
     CSR_create_mpi(mat_block, &private_csr, dimension, row_block, dimension, process_count, MPI_COMM_WORLD);
 
-    //Gathering list of total non-zero elements collected per process
+    // Gathering list of total non-zero elements collected per process
     int private_nzcount = private_csr.start_idx[row_block];
     MPI_Gather(&private_nzcount, 1, MPI_INT, nzcounts, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
@@ -261,7 +261,7 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    //Calculating displacements of non-zero value counts per process
+    // Calculating displacements of non-zero value counts per process
     int *nz_displacements = NULL;
 
     if (my_rank == 0) {
@@ -411,7 +411,7 @@ int main(int argc, char *argv[]) {
         };
 
         // Writing program parameters to external file for testing purposes
-        for (int parameter = 0; parameter < 4; parameter++) {
+        for (int parameter = 0; parameter < 3; parameter++) {
             fprintf(fd, "%d\n", program_parameters[parameter]);
         }
 
