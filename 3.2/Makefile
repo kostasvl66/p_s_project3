@@ -5,6 +5,7 @@ LIBFLAGS = -lm
 D = 1000  #ARRAY_DIMENSION
 Z = 60   #ZERO_PERCENTAGE
 R = 5    #REPETITIONS
+N = 4	 #NUMBER OF NODES USED
 
 ARGS = $(D) $(Z) $(R)
 
@@ -20,12 +21,12 @@ compile-test: test.c
 	gcc $(CFLAGS) test.c -o test
 
 compile: main.c matrixlib.c
-	mpicc $(CFLAGS) -c main.c -fopenmp -o main.o
-	mpicc $(CFLAGS) -c matrixlib.c -fopenmp -o matrixlib.o
-	mpicc $(CFLAGS) main.o matrixlib.o -fopenmp -o main $(LIBFLAGS)
+	mpicc $(CFLAGS) -c main.c -o main.o
+	mpicc $(CFLAGS) -c matrixlib.c -o matrixlib.o
+	mpicc $(CFLAGS) main.o matrixlib.o -o main $(LIBFLAGS)
 
 run: compile
-	mpiexec -n 4 ./main $(ARGS)
+	mpiexec -n $(N) ./main $(ARGS)
 
 clean: main.o matrixlib.o test_data.txt main
 	echo "Cleaning"

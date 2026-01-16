@@ -5,6 +5,7 @@ enum parameter_names {
     dimension,       // Matrix dimension
     zero_percentage, // Percentage of matrix elements with a value of 0
     reps,            // Number of times multiplication is repeated
+    nodes            // Number of nodes used in execution
 };
 
 enum output_times {
