@@ -39,7 +39,7 @@ int CSR_create_mpi(int *matrix_block, CSR_t *private_csr, int row, int row_block
 int *mat_vec_mpi(int *matrix_block, int *private_vector, int *private_result, int rows, int row_block, int col, int col_block, int process_count, MPI_Comm comm);
 
 /* Returns the product of multiplication between a matrix and a vector using CSR representation, and parallel execution*/
-int *CSR_mat_vec_mpi(CSR_t rep, int *vec, int dimension);
+int CSR_mat_vec_mpi(CSR_t *private_csr, int *private_vector, int *private_result, int rows, int row_block, int col, int col_block, int process_count, MPI_Comm comm);
 
 /* Compares two integer arrays. Returns number of non-matching elements */
 void compare_array(int *A1, int *A2, int dimension);
@@ -48,4 +48,4 @@ void compare_array(int *A1, int *A2, int dimension);
 void compare_CSR(CSR_t CSR1, CSR_t CSR2, int non_zero, int rows);
 
 /* Deallocates the memory used by a CSR_t struct*/
-int CSR_destroy(CSR_t *csr);
+int CSR_Destroy(CSR_t *csr);

@@ -63,7 +63,7 @@ int main(int argc, char *argv[]) {
     MPI_Init(&argc, &argv);
     MPI_Comm_size(MPI_COMM_WORLD, &process_count);
     MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
-
+    
     // Initializing values for later use
     int **mat = NULL;
     int *mat_mpi = NULL;
@@ -160,7 +160,7 @@ int main(int argc, char *argv[]) {
         serial_CSRres = (int *)malloc(dimension * sizeof(int));
         x = vec;
         for (int repetition = 0; repetition < reps; repetition++) {
-            serial_CSRres = CSR_mat_vec(M_rep, vec, dimension);
+            serial_CSRres = CSR_mat_vec(M_rep, x, dimension);
             x = serial_CSRres;
         }
 
@@ -280,6 +280,8 @@ int main(int argc, char *argv[]) {
     MPI_Gatherv(private_csr.val_array, private_nzcount, MPI_INT, parallel_M_rep.val_array, nzcounts, nz_displacements, MPI_INT, 0, MPI_COMM_WORLD);
     MPI_Gatherv(private_csr.col_array, private_nzcount, MPI_INT, parallel_M_rep.col_array, nzcounts, nz_displacements, MPI_INT, 0, MPI_COMM_WORLD);
 
+    CSR_Destroy(&private_csr);
+
     if (my_rank == 0) {
         timespec_get(&parallel_CSRrep_finish, TIME_UTC);
 
@@ -358,9 +360,57 @@ int main(int argc, char *argv[]) {
 
         parallel_CSRres = (int *)malloc(dimension * sizeof(int));
     }
+
+    // Initializing and allocating private CSR object for each process to use
+    private_csr = NULL_CSR;
+    private_csr.val_array = malloc(non_zero * sizeof(int));
+    private_csr.col_array = malloc(non_zero * sizeof(int));
+    private_csr.start_idx = malloc((row_block + 1) * sizeof(int));
+    private_csr.start_idx[row_block] = private_nzcount; 
+
+    // Initializing counts of elements to be scattered with Scatterv
+    int *rowcounts = NULL;
+    int *row_displacements = NULL;
+    if (my_rank == 0) {
+        rowcounts = malloc(process_count * sizeof(int));
+        row_displacements = malloc(process_count * sizeof(int));
+
+        int current_disp = 0;
+
+        for (int i = 0; i < process_count; i++) {
+            int row_block_per_process = base_block + (i < row_block_remainder ? 1 : 0);
+
+            rowcounts[i] = row_block_per_process;
+            row_displacements[i] = current_disp;
+            current_disp += rowcounts[i];
+        }
+    }
+
+    // Scattering CSR arrays to each process
+    MPI_Scatterv(parallel_M_rep.start_idx, rowcounts, row_displacements, MPI_INT, private_csr.start_idx, row_block, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Scatterv(parallel_M_rep.val_array, nzcounts, nz_displacements, MPI_INT, private_csr.val_array, private_nzcount, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Scatterv(parallel_M_rep.col_array, nzcounts, nz_displacements, MPI_INT, private_csr.col_array, private_nzcount, MPI_INT, 0, MPI_COMM_WORLD);
+
+    // Scattered row start indexes for each process' private CSR must be 0-based, 
+    int global_idx_offset = private_csr.start_idx[0];
+
+    for (int i=0; i < row_block; i++) {
+        private_csr.start_idx[i] -= global_idx_offset;
+    }
+
+    // Allocating private multiplication and result vectors for each process
+    priv_vec = malloc(row_block * sizeof(int));
+    priv_res = malloc(row_block * sizeof(int));
     x = vec;
     for (int repetition = 0; repetition < reps; repetition++) {
-        parallel_CSRres = CSR_mat_vec_mpi(parallel_M_rep, vec, dimension);
+        // Scattering vector to each process
+        MPI_Scatterv(x, recvcounts, recv_displacements, MPI_INT, priv_vec, col_block, MPI_INT, 0, MPI_COMM_WORLD);
+
+        CSR_mat_vec_mpi(&private_csr, priv_vec, priv_res, dimension, row_block, dimension, col_block, process_count, MPI_COMM_WORLD);
+
+        // Gathering final vector of repetition back into process 0
+        MPI_Gatherv(priv_res, row_block, MPI_INT, parallel_CSRres, recvcounts, recv_displacements, MPI_INT, 0, MPI_COMM_WORLD);
+
         x = parallel_CSRres;
     }
 
@@ -386,6 +436,7 @@ int main(int argc, char *argv[]) {
         printf("Result vectors of serial and parallel CSR multiplication: ");
         compare_array(serial_CSRres, parallel_CSRres, dimension);
         printf("\n");
+
     }
 
     if (my_rank == 0) {
@@ -441,9 +492,9 @@ int main(int argc, char *argv[]) {
         parallel_res = NULL;
         free(parallel_CSRres);
         parallel_CSRres = NULL;
-        CSR_destroy(&M_rep);
+        CSR_Destroy(&M_rep);
     }
-    CSR_destroy(&parallel_M_rep);
+    CSR_Destroy(&parallel_M_rep);
 
     MPI_Finalize();
 
