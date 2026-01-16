@@ -14,7 +14,8 @@ enum output_times {
     serial_CSRmult_avg,  // Average time of serial CSR multiplication
     parallel_mult_avg,   // Average time of paralle multiplication
     parallel_CSR_avg,    // Average time of parallel CSR creation
-    parallel_CSRmult_avg // Average time of parallel CSR multiplication
+    parallel_CSRmult_avg, // Average time of parallel CSR multiplication
+    scatter_time_elapsed      // Total time taken up by scatter operations
 };
 
 int main(int argc, char *argv[]) {
@@ -23,6 +24,7 @@ int main(int argc, char *argv[]) {
     }
 
     int samples = atoi(argv[1]);
+    int nodes_used = atoi(argv[2]);
 
     FILE *fd;
     fd = fopen("test_data.txt", "r");
@@ -31,14 +33,14 @@ int main(int argc, char *argv[]) {
     }
 
     int parameters[3];
-    double averages[6] = {0}, temp;
+    double averages[7] = {0}, temp;
 
     // Reading program outputs samples times and storing their averages
     for (int sample = 0; sample < samples; sample++) {
         for (int param = 0; param < 3; param++) {
             fscanf(fd, "%d", &parameters[param]);
         }
-        for (int output = 0; output < 6; output++) {
+        for (int output = 0; output < 7; output++) {
             fscanf(fd, "%lf", &temp);
             averages[output] += temp;
         }
@@ -50,6 +52,8 @@ int main(int argc, char *argv[]) {
     printf("Array dimension: %d ", parameters[dimension]);
     printf("Zero_percentage: %d ", parameters[zero_percentage]);
     printf("Repetitions: %d ", parameters[reps]);
+    printf("Nodes used for program execution: %d ", nodes_used);
+
 
     printf("Average time calculations for %d sample executions are:\n", samples);
     printf("Serial matrix-vector multiplication: %lf\n", averages[serial_mult_avg]);
@@ -58,6 +62,7 @@ int main(int argc, char *argv[]) {
     printf("Parallel matrix-vector multiplication: %lf\n", averages[parallel_mult_avg]);
     printf("Parallel creation of CSR representation: %lf\n", averages[parallel_CSR_avg]);
     printf("Parallel CSR-vector multiplication: %lf\n", averages[parallel_CSRmult_avg]);
+    printf("Time taken up by Scatter operations: %lf\n", averages[scatter_time_elapsed]);
 
     return 0;
 }

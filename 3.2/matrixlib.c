@@ -194,6 +194,10 @@ int *mat_vec_mpi(int *matrix_block, int *private_vector, int *private_result, in
             private_result[private_i] += matrix_block[private_i * col + j] * vector[j];
         }
     }
+    free(vector);
+    free(recvcounts);
+    free(recv_displacements);
+    vector = recvcounts = recv_displacements = NULL;
     return 0;
 }
 
@@ -232,6 +236,10 @@ int CSR_mat_vec_mpi(CSR_t *private_csr, int *private_vector, int *private_result
         }
     }
 
+    free(vector);
+    free(recvcounts);
+    free(recv_displacements);
+    vector = recvcounts = recv_displacements = NULL;
     return 0;
 }
 

@@ -15,7 +15,7 @@ SAMPLES = 5 #Number of sample executions for test script
 .SILENT:
 test: compile-test
 	chmod +x ./test_script.sh
-	./test_script.sh $(SAMPLES)
+	./test_script.sh $(SAMPLES) $(N)
 	
 compile-test: test.c
 	gcc $(CFLAGS) test.c -o test
@@ -27,6 +27,10 @@ compile: main.c matrixlib.c
 
 run: compile
 	mpiexec -n $(N) ./main $(ARGS)
+
+setup:
+	chmod +x ../setup_files/askdate.sh
+	../setup_files/askdate.sh
 
 clean: main.o matrixlib.o test_data.txt main
 	echo "Cleaning"

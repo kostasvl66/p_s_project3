@@ -10,7 +10,7 @@ do
     make run 
 done
 
-./test $1
+./test $1 $2
 
 echo "--------------------------------------------------------------------------------------------------"
 
@@ -23,7 +23,7 @@ do
     make run D=10000
 done
 
-./test $1
+./test $1 $2
 
 echo "--------------------------------------------------------------------------------------------------"
 
@@ -36,7 +36,7 @@ do
     make run Z=0
 done
 
-./test $1
+./test $1 $2
 
 echo "--------------------------------------------------------------------------------------------------"
 
@@ -49,7 +49,7 @@ do
     make run Z=99
 done
 
-./test $1
+./test $1 $2
 
 echo "--------------------------------------------------------------------------------------------------"
 
@@ -62,7 +62,7 @@ do
     make run R=1
 done
 
-./test $1
+./test $1 $2
 
 echo "--------------------------------------------------------------------------------------------------"
 
@@ -75,30 +75,30 @@ do
     make run R=20
 done
 
-./test $1
+./test $1 $2
 
 echo "--------------------------------------------------------------------------------------------------"
 
 #Clearing output file before writing to it
 > test_data.txt
 
-#Running sample executions of program with 8 threads
+#Running sample executions of program with 8 nodes
 for ((i=1;i<=$1;i++))
 do
-    make run T=8
+    make run N=8
 done
 
-./test $1
+./test $1 $2
 
 echo "--------------------------------------------------------------------------------------------------"
 
 #Clearing output file before writing to it
 > test_data.txt
 
-#Running sample executions of program with 16 threads
+#Running sample executions of program with 16 nodes
 for ((i=1;i<=$1;i++))
 do
-    make run T=16
+    make run N=16
 done
 
-./test $1
+./test $1 $2
