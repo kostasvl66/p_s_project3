@@ -194,19 +194,57 @@ int *mat_vec_mpi(int *matrix_block, int *private_vector, int *private_result, in
             private_result[private_i] += matrix_block[private_i * col + j] * vector[j];
         }
     }
+    free(vector);
+    free(recvcounts);
+    free(recv_displacements);
+    vector = recvcounts = recv_displacements = NULL;
     return 0;
 }
 
 /* Returns the product of multiplication between a matrix and a vector using CSR representation, and parallel execution*/
-int *CSR_mat_vec_mpi(CSR_t rep, int *vec, int dimension) {
-    int *res_vec = malloc(dimension * sizeof(int));
-    res_vec = NULL;
+int CSR_mat_vec_mpi(CSR_t *private_csr, int *private_vector, int *private_result, int rows, int row_block, int col, int col_block, int process_count, MPI_Comm comm) {
+    // Gathering vector for multiplication in all processes using MPI_Allgatherv.
+    int *vector = (int *)malloc(rows * sizeof(int));
 
-    return res_vec;
+    int *recvcounts = malloc(process_count * sizeof(int));
+    int *recv_displacements = malloc(process_count * sizeof(int));
+
+    int base_block = rows / process_count;
+    int remainder = rows % process_count;
+
+    int current_recv_disp = 0;
+    for (int i = 0; i < process_count; i++) {
+        int rows_per_process = base_block + (i < remainder ? 1 : 0);
+
+        recvcounts[i] = rows_per_process;
+        recv_displacements[i] = current_recv_disp;
+        current_recv_disp += recvcounts[i];
+    }
+
+    MPI_Allgatherv(private_vector, col_block, MPI_INT, vector, recvcounts, recv_displacements, MPI_INT, comm);
+
+    // Iterating through all non-zero values stored in the CSR representation
+    int row_start, row_end;
+    for (int i = 0; i < row_block; i++) {
+        // Setting pointers to the start and the end of each line
+        row_start = private_csr->start_idx[i];
+        row_end = private_csr->start_idx[i + 1];
+        private_result[i] = 0; // Initializing elements of result vector as 0
+        for (int j = row_start; j < row_end; j++) {
+            int column = private_csr->col_array[j];
+            private_result[i] += private_csr->val_array[j] * vector[column];
+        }
+    }
+
+    free(vector);
+    free(recvcounts);
+    free(recv_displacements);
+    vector = recvcounts = recv_displacements = NULL;
+    return 0;
 }
 
 /* Deallocates the memory used by a CSR_t struct*/
-int CSR_destroy(CSR_t *csr) {
+int CSR_Destroy(CSR_t *csr) {
     if (csr->col_array)
         free(csr->col_array);
     csr->col_array = NULL;
