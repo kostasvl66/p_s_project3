@@ -5,7 +5,6 @@ enum parameter_names {
     dimension,       // Matrix dimension
     zero_percentage, // Percentage of matrix elements with a value of 0
     reps,            // Number of times multiplication is repeated
-    nodes            // Number of nodes used in execution
 };
 
 enum output_times {
@@ -19,12 +18,12 @@ enum output_times {
 };
 
 int main(int argc, char *argv[]) {
-    if (argc != 2) {
+    if (argc != 3) {
         printf("Program must be called as -> ./test <number of sample executions>");
     }
 
     int samples = atoi(argv[1]);
-    int nodes_used = atoi(argv[2]);
+    int proc_used = atoi(argv[2]);
 
     FILE *fd;
     fd = fopen("test_data.txt", "r");
@@ -52,7 +51,7 @@ int main(int argc, char *argv[]) {
     printf("Array dimension: %d ", parameters[dimension]);
     printf("Zero_percentage: %d ", parameters[zero_percentage]);
     printf("Repetitions: %d ", parameters[reps]);
-    printf("Nodes used for program execution: %d ", nodes_used);
+    printf("Number of processes used for program execution: %d ", proc_used);
 
 
     printf("Average time calculations for %d sample executions are:\n", samples);

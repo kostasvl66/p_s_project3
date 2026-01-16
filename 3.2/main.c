@@ -5,6 +5,22 @@
 #include <stdlib.h>
 #include <time.h>
 
+enum parameter_names {
+    dim,       // Matrix dimension
+    zero_perc, // Percentage of matrix elements with a value of 0
+    repetitions,            // Number of times multiplication is repeated
+};
+
+enum output_times {
+    serial_mult_avg,     // Average time of serial multiplication
+    serial_CSR_avg,      // Average time of serial CSR creation
+    serial_CSRmult_avg,  // Average time of serial CSR multiplication
+    parallel_mult_avg,   // Average time of paralle multiplication
+    parallel_CSR_avg,    // Average time of parallel CSR creation
+    parallel_CSRmult_avg, // Average time of parallel CSR multiplication
+    scatter_time      // Total time taken up by scatter operations
+};
+
 int process_count;
 
 /*Returns a random number in the range 0 - <range_max>*/
@@ -470,6 +486,8 @@ int main(int argc, char *argv[]) {
 
     // }
 
+    
+
     if (my_rank == 0) {
         // Writing data to external file
         FILE *fd;
@@ -493,7 +511,7 @@ int main(int argc, char *argv[]) {
             scatter_time_elapsed      // Total time taken up by scatter operations
         };
 
-        // Writing program parameters to external file for testing purposes
+        // Writing program program_parameters to external file for testing purposes
         for (int parameter = 0; parameter < 3; parameter++) {
             fprintf(fd, "%d\n", program_parameters[parameter]);
         }
@@ -505,6 +523,22 @@ int main(int argc, char *argv[]) {
 
         // Clearing memory
         fclose(fd);
+
+        printf("With program parameters:\n");
+        printf("Array dimension: %d ", program_parameters[dim]);
+        printf("Zero_percentage: %d ", program_parameters[zero_perc]);
+        printf("Repetitions: %d ", program_parameters[repetitions]);
+        printf("\n\n");
+
+        printf("Time calculations are:\n");
+        printf("Serial creation of CSR representation: %lf\n", program_outputs[serial_CSR_avg]);
+        printf("Parallel creation of CSR representation: %lf\n", program_outputs[parallel_CSR_avg]);
+        printf("Time spent sharing data from Process 0(Scatter operations): %lf\n", program_outputs[scatter_time]);
+        printf("Parallel CSR-vector multiplication: %lf\n", program_outputs[parallel_CSRmult_avg]);
+        printf("Total time of serial CSR creation and multiplication: %lf\n", program_outputs[serial_CSR_avg] + program_outputs[serial_CSRmult_avg]);
+        printf("Total time of parallel CSR creation and multiplication: %lf\n", program_outputs[parallel_CSR_avg] + program_outputs[parallel_CSRmult_avg]);
+        printf("Serial matrix-vector multiplication: %lf\n", program_outputs[serial_mult_avg]);
+        printf("Parallel matrix-vector multiplication: %lf\n", program_outputs[parallel_mult_avg]);
     }
 
     // Memory allocated specifically by Process 0 should also be freed by it and no other
